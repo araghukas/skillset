@@ -1,0 +1,14 @@
+# Local kind cluster + registry, provisioned with:
+#   ctlptl apply -f local/cluster.yaml
+# Torn down with:
+#   ctlptl delete -f local/cluster.yaml
+apiVersion: ctlptl.dev/v1alpha1
+kind: Registry
+name: skillsd-registry
+port: 5005
+---
+apiVersion: ctlptl.dev/v1alpha1
+kind: Cluster
+product: kind
+name: kind-skillsd
+registry: skillsd-registry

@@ -1,0 +1,101 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "skillsd.fullname" . }}
+  labels:
+    {{- include "skillsd.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "skillsd.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "skillsd.selectorLabels" . | nindent 8 }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "skillsd.serviceAccountName" . }}
+      terminationGracePeriodSeconds: 30
+      volumes:
+        - name: skills-data
+          emptyDir: {}
+        {{- if .Values.skillsRepo.existingSecret }}
+        - name: git-secret
+          secret:
+            secretName: {{ .Values.skillsRepo.existingSecret }}
+            defaultMode: 0400
+        {{- end }}
+      initContainers:
+        - name: skills-clone
+          image: {{ .Values.skillsRepo.cloneImage }}
+          command: ["sh", "-c"]
+          args:
+            - |
+              set -eu
+              {{- if .Values.skillsRepo.existingSecret }}
+              export GIT_SSH_COMMAND="ssh -i /etc/git-secret/ssh-privatekey -o UserKnownHostsFile=/etc/git-secret/known_hosts -o IdentitiesOnly=yes"
+              {{- end }}
+              git clone --depth 1 --branch "$GIT_BRANCH" "$GIT_URL" "$SKILLS_DIR"
+          env:
+            - name: GIT_URL
+              value: {{ .Values.skillsRepo.url | quote }}
+            - name: GIT_BRANCH
+              value: {{ .Values.skillsRepo.branch | quote }}
+            - name: SKILLS_DIR
+              value: {{ .Values.mountPath | quote }}
+          volumeMounts:
+            - name: skills-data
+              mountPath: {{ .Values.mountPath }}
+            {{- if .Values.skillsRepo.existingSecret }}
+            - name: git-secret
+              mountPath: /etc/git-secret
+              readOnly: true
+            {{- end }}
+      containers:
+        - name: skillsd
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.service.port }}
+              name: grpc
+          env:
+            - name: GRPC_ADDR
+              value: {{ .Values.grpcAddr | quote }}
+            - name: SKILLS_DIR
+              value: {{ .Values.mountPath | quote }}
+            - name: SKILLS_SUBPATH
+              value: {{ .Values.skillsRepo.subPath | quote }}
+            - name: LOG_LEVEL
+              value: {{ .Values.logLevel | quote }}
+          volumeMounts:
+            - name: skills-data
+              mountPath: {{ .Values.mountPath }}
+              readOnly: true
+          readinessProbe:
+            grpc:
+              port: {{ .Values.service.port }}
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            grpc:
+              port: {{ .Values.service.port }}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

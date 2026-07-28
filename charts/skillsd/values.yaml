@@ -1,0 +1,55 @@
+replicaCount: 2
+
+image:
+  repository: skillsd
+  tag: latest
+  pullPolicy: IfNotPresent
+
+grpcAddr: ":8080"
+
+# logLevel sets the minimum slog level emitted by skillsd, e.g. "debug",
+# "info", "warn", "error".
+logLevel: info
+
+service:
+  type: ClusterIP
+  port: 8080
+
+# skillsRepo configures the init container that clones the skill
+# definitions into a shared, read-only (from the main container's
+# perspective) volume before skillsd starts.
+skillsRepo:
+  # url is the git repository containing skill definitions, e.g.
+  # "https://github.com/example/skills.git" or "git@github.com:example/skills.git".
+  url: ""
+  # branch is checked out with a shallow (--depth 1) clone.
+  branch: main
+  # subPath is an optional subdirectory within the repo under which skill
+  # directories actually live. Leave empty if skills sit at the repo root.
+  subPath: skills
+  # cloneImage must have git available on PATH.
+  cloneImage: alpine/git:latest
+
+  # existingSecret, if set, is mounted read-only at /etc/git-secret and used
+  # for SSH-based authentication against a private repo. It must contain:
+  #   ssh-privatekey - a private key authorized to read the repo
+  #   known_hosts    - the git host's public key(s)
+  # Leave empty for public, unauthenticated HTTPS clones.
+  existingSecret: ""
+
+# mountPath is where the cloned repo is mounted in both the init container
+# (read-write) and the main container (read-only). Also set as SKILLS_DIR.
+mountPath: /skills
+
+resources: {}
+
+podAnnotations: {}
+
+serviceAccount:
+  create: false
+  name: ""
+  annotations: {}
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

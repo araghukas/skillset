@@ -1,0 +1,30 @@
+.DS_Store
+
+/local/git-deploy-key*
+/local/git-known-hosts
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+.env
+.env.*
+*kubeconfig*
+
+# --- Go build artifacts ---
+/skillsd
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+coverage.out
+coverage.html
+
+# --- Editors / IDEs ---
+.claude/
+.vscode/
+.idea/
+*.iml
+*.swp
+*.swo
+*~
