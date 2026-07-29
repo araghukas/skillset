@@ -50,15 +50,15 @@ func (b *FSBackend) List(ctx context.Context, prefix string) ([]string, error) {
 }
 
 // Get reads a single file by key (a path relative to root).
-func (b *FSBackend) Get(ctx context.Context, key string) (Object, error) {
+func (b *FSBackend) Get(ctx context.Context, key string) (FileObject, error) {
 	path := filepath.Join(b.root, filepath.FromSlash(key))
 
 	content, err := os.ReadFile(path)
 	if err != nil {
-		return Object{}, fmt.Errorf("storage: reading %s: %w", path, err)
+		return FileObject{}, fmt.Errorf("storage: reading %s: %w", path, err)
 	}
 
-	return Object{
+	return FileObject{
 		Key:         key,
 		Content:     content,
 		ContentType: mime.TypeByExtension(filepath.Ext(path)),

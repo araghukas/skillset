@@ -2,6 +2,7 @@
 
 /local/git-deploy-key*
 /local/git-known-hosts
+/local/github-token
 *.pem
 *.key
 id_rsa*

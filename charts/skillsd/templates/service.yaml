@@ -8,6 +8,7 @@ spec:
   type: {{ .Values.service.type }}
   selector:
     {{- include "skillsd.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: skillsd
   ports:
     - port: {{ .Values.service.port }}
       targetPort: grpc

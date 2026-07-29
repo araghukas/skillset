@@ -2,8 +2,8 @@ package storage
 
 import "context"
 
-// Object is a single file read from the backing store.
-type Object struct {
+// FileObject is a single file read from the backing store.
+type FileObject struct {
 	Key         string
 	Content     []byte
 	ContentType string
@@ -16,5 +16,5 @@ type Backend interface {
 	List(ctx context.Context, prefix string) ([]string, error)
 
 	// Get fetches a single object by key.
-	Get(ctx context.Context, key string) (Object, error)
+	Get(ctx context.Context, key string) (FileObject, error)
 }

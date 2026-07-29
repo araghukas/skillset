@@ -21,6 +21,10 @@ app.kubernetes.io/name: {{ include "skillsd.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
+{{- define "skillsd.registryFullname" -}}
+{{- printf "%s-registry" (include "skillsd.fullname" .) -}}
+{{- end -}}
+
 {{- define "skillsd.serviceAccountName" -}}
 {{- if .Values.serviceAccount.create -}}
 {{- .Values.serviceAccount.name | default (include "skillsd.fullname" .) -}}

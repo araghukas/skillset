@@ -9,10 +9,12 @@ spec:
   selector:
     matchLabels:
       {{- include "skillsd.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: skillsd
   template:
     metadata:
       labels:
         {{- include "skillsd.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: skillsd
       {{- with .Values.podAnnotations }}
       annotations:
         {{- toYaml . | nindent 8 }}
@@ -69,6 +71,10 @@ spec:
               value: {{ .Values.mountPath | quote }}
             - name: SKILLS_SUBPATH
               value: {{ .Values.skillsRepo.subPath | quote }}
+            - name: GRPC_MAX_RECV_MSG_SIZE_BYTES
+              value: {{ mul .Values.grpcMaxRecvMsgSizeMiB 1048576 | quote }}
+            - name: GRPC_MAX_SEND_MSG_SIZE_BYTES
+              value: {{ mul .Values.grpcMaxSendMsgSizeMiB 1048576 | quote }}
             - name: LOG_LEVEL
               value: {{ .Values.logLevel | quote }}
           volumeMounts:

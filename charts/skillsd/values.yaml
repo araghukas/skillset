@@ -11,6 +11,13 @@ grpcAddr: ":8080"
 # "info", "warn", "error".
 logLevel: info
 
+# grpcMaxRecvMsgSizeMiB / grpcMaxSendMsgSizeMiB cap the size (in MiB) of a
+# single incoming/outgoing gRPC message (grpc.MaxRecvMsgSize /
+# grpc.MaxSendMsgSize). gRPC-Go itself defaults both to 4 MiB; the send side
+# matters here for GetSkillAtRef responses that include context files.
+grpcMaxRecvMsgSizeMiB: 8
+grpcMaxSendMsgSizeMiB: 8
+
 service:
   type: ClusterIP
   port: 8080
@@ -42,6 +49,81 @@ skillsRepo:
 mountPath: /skills
 
 resources: {}
+
+# registry configures the optional skillsd-registry component: a
+# single-replica, persistent write path that lets AI agents propose changes
+# to skills as git commits and submit them as GitHub pull requests for
+# human review. Enabled by default; the read-only skillsd fleet above also
+# works standalone if you set this to false.
+registry:
+  enabled: true
+
+  image:
+    repository: skillsd
+    tag: latest
+    pullPolicy: IfNotPresent
+
+  # grpcAddr is passed through as GRPC_ADDR; service.port must match its
+  # port number.
+  grpcAddr: ":8081"
+
+  service:
+    type: ClusterIP
+    port: 8081
+
+  # fetchInterval is how often the base branch is re-fetched from origin in
+  # the background, so reads stay fresh without a network round-trip per
+  # request. Unlike skillsd's static, once-loaded index, this component is
+  # meant to track live upstream state.
+  fetchInterval: 5m
+
+  # grpcMaxRecvMsgSizeMiB / grpcMaxSendMsgSizeMiB cap the size (in MiB) of a
+  # single incoming/outgoing gRPC message. The recv side bounds a whole
+  # ProposeChangeRequest (every FileChange in the call counts against it);
+  # the send side matters for GetProposal's diff and GetSkillAtRef's
+  # context files. gRPC-Go itself defaults both to 4 MiB.
+  grpcMaxRecvMsgSizeMiB: 8
+  grpcMaxSendMsgSizeMiB: 8
+
+  # maxFileContentSizeMiB caps a single proposed file's content (in MiB)
+  # before ProposeChange rejects it with a clear application-level error,
+  # rather than letting a large blob into repo history or the gRPC
+  # transport reject it with a confusing ResourceExhausted.
+  maxFileContentSizeMiB: 1
+
+  # repoDir is where the git working copy is kept, inside the PVC below.
+  repoDir: /var/lib/skillsd-registry
+
+  persistence:
+    size: 1Gi
+    storageClassName: ""
+
+  skillsRepo:
+    # url is the HTTPS clone URL of the skills repository. Distinct from
+    # skillsRepo.url above (which may be ssh://): this component needs
+    # push access, authenticated via github.tokenSecret below rather than
+    # an SSH deploy key.
+    url: ""
+    # baseBranch is the branch proposals fork from and pull requests target.
+    baseBranch: main
+    # subPath is an optional subdirectory within the repo under which skill
+    # directories actually live. Leave empty if skills sit at the repo root.
+    subPath: skills
+
+  github:
+    # owner/repo identify the GitHub repository pull requests are opened
+    # against.
+    owner: ""
+    repo: ""
+    # tokenSecret is the name of an existingSecret containing a GitHub
+    # token (key "token") with push and pull-request write access. Used for
+    # both the HTTPS git push and the GitHub REST API - one credential
+    # instead of two.
+    tokenSecret: ""
+    # apiBaseURL overrides the GitHub API base, for GitHub Enterprise.
+    apiBaseURL: "https://api.github.com"
+
+  resources: {}
 
 podAnnotations: {}
 

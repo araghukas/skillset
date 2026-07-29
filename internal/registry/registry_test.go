@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/araghukas/skillset/internal/skillparse"
 	"github.com/araghukas/skillset/internal/storage"
 )
 
@@ -17,7 +18,7 @@ func writeSkill(t *testing.T, root, name, content string) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, skillFileName), []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, skillparse.SkillFileName), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -61,7 +62,7 @@ func TestLoadWithPrefix(t *testing.T) {
 	if sk.Metadata.Description != "test desc" {
 		t.Fatalf("unexpected description: %q", sk.Metadata.Description)
 	}
-	if len(sk.Metadata.ContextFiles) != 1 || sk.Metadata.ContextFiles[0].FilePath != skillFileName {
+	if len(sk.Metadata.ContextFiles) != 1 || sk.Metadata.ContextFiles[0].FilePath != skillparse.SkillFileName {
 		t.Fatalf("unexpected context files: %+v", sk.Metadata.ContextFiles)
 	}
 }
@@ -115,7 +116,7 @@ func TestLoadSkipsNonUTF8ContextFiles(t *testing.T) {
 	for _, cf := range sk.Metadata.ContextFiles {
 		paths = append(paths, cf.FilePath)
 	}
-	for _, want := range []string{skillFileName, "references/notes.txt"} {
+	for _, want := range []string{skillparse.SkillFileName, "references/notes.txt"} {
 		found := false
 		for _, p := range paths {
 			if p == want {
@@ -142,7 +143,7 @@ func TestLoadFailsWhenSkillMdItselfIsNotUTF8(t *testing.T) {
 	root := t.TempDir()
 	// Valid frontmatter followed by an invalid UTF-8 byte sequence in the body.
 	content := append([]byte("---\nname: odd-body\ndescription: has invalid utf8 in body\n---\nbody "), 0xFF, 0xFE)
-	writeSkillFile(t, root, "odd-body", skillFileName, content)
+	writeSkillFile(t, root, "odd-body", skillparse.SkillFileName, content)
 
 	reg := New(storage.NewFSBackend(root), "")
 	n, err := reg.Load(context.Background())

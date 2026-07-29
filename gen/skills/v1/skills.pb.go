@@ -187,7 +187,7 @@ func (x *SkillMetadata) GetContextFiles() []*SkillContextFile {
 
 type ListSkillsRequest struct {
 	state               protoimpl.MessageState `protogen:"open.v1"`
-	Category            string                 `protobuf:"bytes,1,opt,name=category,proto3" json:"category,omitempty"`                                                     // Filter by category or subdirectory
+	Category            string                 `protobuf:"bytes,1,opt,name=category,proto3" json:"category,omitempty"`                                                     // Filter to skills whose metadata["category"] matches exactly; empty returns all
 	IncludeContextFiles bool                   `protobuf:"varint,2,opt,name=include_context_files,json=includeContextFiles,proto3" json:"include_context_files,omitempty"` // Set true to fetch supporting context files alongside schemas
 	unknownFields       protoimpl.UnknownFields
 	sizeCache           protoimpl.SizeCache

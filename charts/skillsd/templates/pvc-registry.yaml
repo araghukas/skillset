@@ -1,0 +1,21 @@
+{{- if .Values.registry.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "skillsd.registryFullname" . }}
+  labels:
+    {{- include "skillsd.labels" . | nindent 4 }}
+    app.kubernetes.io/component: registry
+spec:
+  # A single writer replica ever mounts this volume, so ReadWriteOnce is
+  # sufficient - see deployment-registry.yaml's Recreate strategy, which
+  # keeps two pods from trying to mount it at once during a rollout.
+  accessModes:
+    - ReadWriteOnce
+  {{- with .Values.registry.persistence.storageClassName }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.registry.persistence.size }}
+{{- end }}

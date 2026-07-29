@@ -6,10 +6,11 @@ Support files for the local dev loop (`make dev` / `tilt up`): a `ctlptl`-manage
 ```
 local/
 ├── cluster.yaml          # ctlptl spec: kind cluster "kind-skillsd" + registry "skillsd-registry"
-├── values.yaml            # Helm values override (replicaCount, logLevel, image, skillsRepo)
+├── values.yaml            # Helm values override (replicaCount, logLevel, image, skillsRepo, registry)
 ├── git-deploy-key         # optional, gitignored: SSH deploy key for a private skillsRepo
 ├── git-deploy-key.pub     # optional, gitignored
-└── git-known-hosts        # optional, gitignored: generated via `make git-known-hosts`
+├── git-known-hosts        # optional, gitignored: generated via `make git-known-hosts`
+└── github-token           # optional, gitignored: GitHub token enabling skillsd-registry (see below)
 ```
 
 See the root [README.md](../README.md) for the full local dev walkthrough
@@ -81,4 +82,55 @@ in main.go):
 
 ```bash
 grpcurl -plaintext localhost:8080 grpc.health.v1.Health/Check
+```
+
+---
+
+## Exercising skillsd-registry (proposals + PRs)
+
+`skillsd-registry` is enabled by default in the chart (`registry.enabled: true`), which means `tilt up` needs `registry.github.tokenSecret` set from the start - the chart's `required` guard fails the whole render without one. The Tiltfile only wires that secret up once `local/github-token` is present, so that file isn't optional for local dev anymore. To try it locally:
+
+1. Fill in `registry.skillsRepo.url` and `registry.github.owner`/`repo` in
+   [values.yaml](values.yaml) - point them at a real (ideally throwaway)
+   GitHub repo you can push branches and open PRs against.
+2. Drop a GitHub token with push + pull-request write access on that repo
+   at `local/github-token` (gitignored). The Tiltfile picks this up, creates
+   a Secret from it, and sets `registry.enabled=true` automatically - no
+   `helm_set` flags to pass by hand.
+3. `tilt up`. Once `skillsd-registry` is healthy, it's forwarded at
+   `localhost:8081`.
+
+Propose a change (full new file content, not a patch - the server computes
+the diff):
+
+```bash
+grpcurl -plaintext -d '{
+  "skill_name": "frontend-design",
+  "agent_id": "agent-1",
+  "proposal_id": "fix-typo",
+  "commit_message": "fix typo in description",
+  "files": [{"file_path": "SKILL.md", "content": "---\nname: frontend-design\ndescription: designs frontends, fixed\n---\nbody\n"}]
+}' localhost:8081 skills.v1.ProposalService/ProposeChange
+```
+
+Inspect it (includes the unified diff against base):
+
+```bash
+grpcurl -plaintext -d '{"branch": "proposals/agent-1/frontend-design/fix-typo"}' \
+  localhost:8081 skills.v1.ProposalService/GetProposal
+```
+
+View the skill as of that proposal branch, or as of the base branch
+(`ref` empty):
+
+```bash
+grpcurl -plaintext -d '{"skill_name": "frontend-design", "ref": "proposals/agent-1/frontend-design/fix-typo"}' \
+  localhost:8081 skills.v1.ProposalService/GetSkillAtRef
+```
+
+Push the branch and open a real GitHub pull request for human review:
+
+```bash
+grpcurl -plaintext -d '{"branch": "proposals/agent-1/frontend-design/fix-typo"}' \
+  localhost:8081 skills.v1.ProposalService/SubmitProposal
 ```

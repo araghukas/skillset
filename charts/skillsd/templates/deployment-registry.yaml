@@ -1,0 +1,108 @@
+{{- if .Values.registry.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "skillsd.registryFullname" . }}
+  labels:
+    {{- include "skillsd.labels" . | nindent 4 }}
+    app.kubernetes.io/component: registry
+spec:
+  # Exactly one writer: skillsd-registry owns a single git working copy on
+  # an RWO PVC, and mutating git operations serialize on an in-process
+  # mutex, not a distributed lock. Recreate (instead of the default
+  # RollingUpdate) keeps a second pod from starting - and trying to mount
+  # the same RWO volume - before the outgoing one has fully terminated.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "skillsd.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: registry
+  template:
+    metadata:
+      labels:
+        {{- include "skillsd.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: registry
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "skillsd.serviceAccountName" . }}
+      terminationGracePeriodSeconds: 30
+      volumes:
+        - name: repo-data
+          persistentVolumeClaim:
+            claimName: {{ include "skillsd.registryFullname" . }}
+      containers:
+        - name: skillsd-registry
+          image: "{{ .Values.registry.image.repository }}:{{ .Values.registry.image.tag }}"
+          imagePullPolicy: {{ .Values.registry.image.pullPolicy }}
+          command: ["/skillsd-registry"]
+          ports:
+            - containerPort: {{ .Values.registry.service.port }}
+              name: grpc
+          env:
+            - name: GRPC_ADDR
+              value: {{ .Values.registry.grpcAddr | quote }}
+            - name: REPO_DIR
+              value: {{ .Values.registry.repoDir | quote }}
+            - name: SKILLS_REPO_URL
+              value: {{ .Values.registry.skillsRepo.url | quote }}
+            - name: SKILLS_REPO_BASE_BRANCH
+              value: {{ .Values.registry.skillsRepo.baseBranch | quote }}
+            - name: SKILLS_SUBPATH
+              value: {{ .Values.registry.skillsRepo.subPath | quote }}
+            - name: GITHUB_OWNER
+              value: {{ .Values.registry.github.owner | quote }}
+            - name: GITHUB_REPO
+              value: {{ .Values.registry.github.repo | quote }}
+            - name: GITHUB_API_BASE_URL
+              value: {{ .Values.registry.github.apiBaseURL | quote }}
+            - name: FETCH_INTERVAL
+              value: {{ .Values.registry.fetchInterval | quote }}
+            - name: GRPC_MAX_RECV_MSG_SIZE_BYTES
+              value: {{ mul .Values.registry.grpcMaxRecvMsgSizeMiB 1048576 | quote }}
+            - name: GRPC_MAX_SEND_MSG_SIZE_BYTES
+              value: {{ mul .Values.registry.grpcMaxSendMsgSizeMiB 1048576 | quote }}
+            - name: MAX_FILE_CONTENT_BYTES
+              value: {{ mul .Values.registry.maxFileContentSizeMiB 1048576 | quote }}
+            - name: LOG_LEVEL
+              value: {{ .Values.logLevel | quote }}
+            # A bearer token, not an SSH key, so it's wired in as an env
+            # var via secretKeyRef rather than mounted as a file alongside
+            # skillsRepo.existingSecret's ssh-privatekey/known_hosts above.
+            - name: GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "registry.github.tokenSecret is required when registry.enabled is true" .Values.registry.github.tokenSecret }}
+                  key: token
+          volumeMounts:
+            - name: repo-data
+              mountPath: {{ .Values.registry.repoDir }}
+          readinessProbe:
+            grpc:
+              port: {{ .Values.registry.service.port }}
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            grpc:
+              port: {{ .Values.registry.service.port }}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.registry.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

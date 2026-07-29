@@ -58,7 +58,10 @@ func run() error {
 		return err
 	}
 
-	grpcServer := grpc.NewServer()
+	grpcServer := grpc.NewServer(
+		grpc.MaxRecvMsgSize(cfg.GRPCMaxRecvMsgSizeBytes),
+		grpc.MaxSendMsgSize(cfg.GRPCMaxSendMsgSizeBytes),
+	)
 	skillsv1.RegisterSkillServiceServer(grpcServer, server.New(reg))
 	grpc_health_v1.RegisterHealthServer(grpcServer, healthSrv)
 	reflection.Register(grpcServer)

@@ -17,8 +17,9 @@ help: ## Show this help
 ## --- Go ---
 
 .PHONY: build
-build: ## Build the skillsd binary into ./bin
+build: ## Build the skillsd and skillsd-registry binaries into ./bin
 	go build -o bin/$(APP) ./cmd/skillsd
+	go build -o bin/$(APP)-registry ./cmd/skillsd-registry
 
 .PHONY: test
 test: ## Run the test suite

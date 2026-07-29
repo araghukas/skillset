@@ -1,0 +1,118 @@
+syntax = "proto3";
+
+package skills.v1;
+
+option go_package = "github.com/araghukas/skillset/gen/skills/v1;skillsv1";
+
+import "google/protobuf/timestamp.proto";
+import "skills/v1/skills.proto";
+
+// ==========================================
+// Service Definition
+// ==========================================
+
+// ProposalService lets an AI agent propose edits to an existing skill as a
+// real git commit on a dedicated branch, inspect that proposal (including
+// its diff against the base branch), view a skill as of any ref, and -
+// once ready for human review - submit the proposal as a GitHub pull
+// request. Proposal state lives entirely in the underlying git repository.
+service ProposalService {
+  // Commits one or more full-content file changes to a skill on a proposal
+  // branch, creating the branch (from the current base branch HEAD) if it
+  // doesn't already exist, or appending a commit to it otherwise.
+  rpc ProposeChange (ProposeChangeRequest) returns (Proposal);
+
+  // Lists proposals, optionally filtered by skill and/or proposing agent.
+  rpc ListProposals (ListProposalsRequest) returns (ListProposalsResponse);
+
+  // Fetches a single proposal, including its unified diff against base.
+  rpc GetProposal (GetProposalRequest) returns (Proposal);
+
+  // Fetches a skill's metadata and context files as of an arbitrary ref
+  // (a branch name or a commit SHA); an empty ref resolves to the current
+  // base branch HEAD.
+  rpc GetSkillAtRef (GetSkillAtRefRequest) returns (GetSkillResponse);
+
+  // Pushes a proposal's branch upstream and opens a GitHub pull request
+  // against the base branch for human review.
+  rpc SubmitProposal (SubmitProposalRequest) returns (SubmitProposalResponse);
+}
+
+// ==========================================
+// Data Structures
+// ==========================================
+
+// FileChange is one file's full new content within a proposal. Proposals
+// carry complete file contents rather than patches: the server computes the
+// diff itself, so callers never need to worry about patch/context lines or
+// applying a patch against a base they may not have in sync.
+message FileChange {
+  string file_path = 1;  // Relative path within the skill directory
+  bool deleted = 2;       // If true, the file is removed; content is ignored
+  string content = 3;     // Full new file content, encoded as UTF-8
+}
+
+message CommitInfo {
+  string sha = 1;
+  string message = 2;
+  string author = 3;
+  google.protobuf.Timestamp authored_at = 4;
+}
+
+// Proposal is a single agent's line of edits to one skill, tracked as a
+// branch in the underlying git repository.
+message Proposal {
+  string proposal_id = 1;         // Caller-chosen slug, unique per (agent_id, skill_name)
+  string branch = 2;              // Full branch name: proposals/<agent_id>/<skill_name>/<proposal_id>
+  string skill_name = 3;
+  string agent_id = 4;
+  string base_sha = 5;            // Base branch commit this proposal forked from
+  string head_sha = 6;            // Current tip of the proposal branch
+  string diff = 7;                // Unified diff, head vs base
+  repeated CommitInfo commits = 8;
+  string source_thread_uri = 9;   // Pointer to the agent's uploaded conversation JSON, if provided
+  google.protobuf.Timestamp updated_at = 10;
+}
+
+// ==========================================
+// Request & Response Messages
+// ==========================================
+
+message ProposeChangeRequest {
+  string skill_name = 1;
+  string agent_id = 2;
+  string proposal_id = 3;
+  repeated FileChange files = 4;
+  string commit_message = 5;
+  string source_thread_uri = 6;
+}
+
+message ListProposalsRequest {
+  string skill_name = 1;  // Optional filter
+  string agent_id = 2;    // Optional filter
+}
+
+message ListProposalsResponse {
+  repeated Proposal proposals = 1;
+}
+
+message GetProposalRequest {
+  string branch = 1;  // Fully-qualified branch name, as returned in Proposal.branch
+}
+
+message GetSkillAtRefRequest {
+  string skill_name = 1;
+  string ref = 2;                       // Branch name or commit SHA; empty = base branch HEAD
+  bool include_context_files = 3;
+}
+
+message SubmitProposalRequest {
+  string branch = 1;     // Fully-qualified branch name, as returned in Proposal.branch
+  string pr_title = 2;   // Optional; defaulted from the proposal's commits if empty
+  string pr_body = 3;    // Optional; defaulted (includes source_thread_uri) if empty
+}
+
+message SubmitProposalResponse {
+  string pull_request_url = 1;
+  int64 pull_request_number = 2;
+}

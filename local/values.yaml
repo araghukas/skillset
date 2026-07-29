@@ -16,3 +16,17 @@ skillsRepo:
   # Left empty here; the Tiltfile sets this to a generated secret name if
   # local/git-deploy-key and local/git-known-hosts are both present.
   existingSecret: ""
+
+# registry is only actually deployed if local/github-token is present (see
+# Tiltfile) - fill in skillsRepo.url/github.owner+repo here first if you
+# want to exercise the proposal/PR write path locally.
+registry:
+  skillsRepo:
+    # HTTPS, not ssh:// - registry.github.tokenSecret authenticates both
+    # the push and the PR API. Needs push access on whatever repo/branch
+    # this points at.
+    url: ""
+    baseBranch: main
+  github:
+    owner: ""
+    repo: ""
