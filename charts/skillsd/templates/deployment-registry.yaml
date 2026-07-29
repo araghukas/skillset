@@ -73,9 +73,6 @@ spec:
             - name: LOG_LEVEL
               value: {{ .Values.logLevel | quote }}
             {{- if .Values.registry.github.tokenSecret }}
-            # A bearer token, not an SSH key, so it's wired in as an env
-            # var via secretKeyRef rather than mounted as a file alongside
-            # skillsRepo.existingSecret's ssh-privatekey/known_hosts above.
             # Left unset, skillsd-registry starts with SubmitProposal disabled.
             - name: GITHUB_TOKEN
               valueFrom:

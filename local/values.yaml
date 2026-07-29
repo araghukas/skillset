@@ -11,13 +11,14 @@ image:
 
 skillsRepo:
   # Point this at a real (or throwaway public) skills repo to test against.
-  url: "git@github.com:anthropics/skills.git"
+  # A public repo needs no auth at all; see tokenSecret below for private.
+  url: "https://github.com/araghukas/skillset-skills.git"
   branch: main
   # Left empty here; the Tiltfile sets this to a generated secret name if
-  # local/git-deploy-key and local/git-known-hosts are both present.
-  existingSecret: ""
+  # local/git-skillsd-token is present.
+  tokenSecret: ""
 
-# registry is only actually deployed if local/github-token is present (see
+# registry is only actually deployed if local/git-skillsd-registry-token is present (see
 # Tiltfile) - fill in skillsRepo.url/github.owner+repo here first if you
 # want to exercise the proposal/PR write path locally.
 registry:
@@ -27,11 +28,10 @@ registry:
     pullPolicy: IfNotPresent
 
   skillsRepo:
-    # HTTPS, not ssh:// - registry.github.tokenSecret authenticates both
-    # the push and the PR API. Needs push access on whatever repo/branch
-    # this points at.
-    url: ""
+    # registry.github.tokenSecret authenticates both the push and the PR
+    # API. Needs push access on whatever repo/branch this points at.
+    url: "https://github.com/araghukas/skillset-skills.git"
     baseBranch: main
   github:
-    owner: ""
-    repo: ""
+    owner: "araghukas"
+    repo: "skillset-skills"

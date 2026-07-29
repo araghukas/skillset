@@ -1,23 +1,28 @@
 # Local dev loop for skillsd.
-#
+
 # Prerequisites (one-time):
-#   ctlptl apply -f local/cluster.yaml
-#
+#   `ctlptl apply -f local/cluster.yaml`
+
 # Then:
-#   tilt up
+#   `tilt up`
+
+# OR, just run the following to start the cluster AND do Tilt up:
+#   `made dev`
+
+# Optional private-repo auth for the read-only skillsd fleet: drop a
+# fine-grained GitHub token scoped read-only ("Contents: read") to the repo
+# configured at skillsRepo.url in local/values.yaml at
+#   local/git-skillsd-token
 #
-# Optional private-repo auth for the read-only skillsd fleet: drop an SSH
-# deploy key and known_hosts file at
-#   local/git-deploy-key
-#   local/git-known-hosts
-# (both gitignored) and this Tiltfile will create a Secret from them and
-# point charts/skillsd's skillsRepo.existingSecret at it automatically.
-#
+# (gitignored) and this Tiltfile will create a Secret from it and point
+# charts/skillsd's skillsRepo.tokenSecret at it automatically.
+
 # Optional skillsd-registry (proposal/PR write path): drop a GitHub token
 # with push + pull-request write access on the repo configured at
 # registry.skillsRepo.url / registry.github.owner+repo in local/values.yaml
 # at
-#   local/github-token
+#   local/git-skillsd-registry-token
+#
 # (gitignored) and this Tiltfile will create a Secret from it, enable
 # registry.enabled, and point registry.github.tokenSecret at it
 # automatically.
@@ -28,12 +33,15 @@ docker_build(
     'localhost:5005/skillsd',
     '.',
     dockerfile='Dockerfile',
+    ignore=['README.md', 'Makefile', '.gitignore'],
 )
 
 load("ext://base64", "encode_base64")
 
+# Read-only repo auth: create a Secret from local/git-skillsd-token, if present
+
 git_secret_name = ''
-if os.path.exists('local/git-deploy-key') and os.path.exists('local/git-known-hosts'):
+if os.path.exists('local/git-skillsd-token'):
     git_secret_name = 'skillsd-git-auth'
     k8s_yaml(blob('''
 apiVersion: v1
@@ -42,20 +50,20 @@ metadata:
   name: {name}
 type: Opaque
 data:
-  ssh-privatekey: {key}
-  known_hosts: {known_hosts}
+  token: {token}
 '''.format(
         name=git_secret_name,
-        key=encode_base64(read_file('local/git-deploy-key')),
-        known_hosts=encode_base64(read_file('local/git-known-hosts')),
+        token=encode_base64(str(read_file('local/git-skillsd-token')).rstrip()),
     )))
 
 helm_set = []
 if git_secret_name:
-    helm_set.append('skillsRepo.existingSecret=' + git_secret_name)
+    helm_set.append('skillsRepo.tokenSecret=' + git_secret_name)
+
+# Registry write path: create a Secret from local/git-skillsd-registry-token, if present
 
 registry_secret_name = ''
-if os.path.exists('local/github-token'):
+if os.path.exists('local/git-skillsd-registry-token'):
     registry_secret_name = 'skillsd-registry-github'
     k8s_yaml(blob('''
 apiVersion: v1
@@ -67,10 +75,12 @@ data:
   token: {token}
 '''.format(
         name=registry_secret_name,
-        token=encode_base64(str(read_file('local/github-token')).rstrip()),
+        token=encode_base64(str(read_file('local/git-skillsd-registry-token')).rstrip()),
     )))
     helm_set.append('registry.enabled=true')
     helm_set.append('registry.github.tokenSecret=' + registry_secret_name)
+
+# Install the skillsd chart, wiring in any secrets created above
 
 k8s_yaml(helm(
     'charts/skillsd',

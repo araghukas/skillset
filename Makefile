@@ -8,7 +8,6 @@ KIND_CONTEXT  := kind-skillsd
 CLUSTER_CFG   := local/cluster.yaml
 VALUES        := local/values.yaml
 GRPC_PORT     := 8080
-GIT_HOST      := github.com
 
 .PHONY: help
 help: ## Show this help
@@ -69,10 +68,6 @@ helm-template: ## Render the skillsd chart with local values
 
 ## --- Dev loop ---
 
-.PHONY: git-known-hosts
-git-known-hosts: ## Generate local/git-known-hosts for GIT_HOST (used by the Tiltfile's optional git-auth Secret)
-	ssh-keyscan $(GIT_HOST) > local/git-known-hosts
-
 .PHONY: check-prereqs
 check-prereqs: ## Verify required local tools are installed
 	@for bin in docker ctlptl kubectl helm tilt; do \
@@ -81,7 +76,7 @@ check-prereqs: ## Verify required local tools are installed
 
 .PHONY: dev
 dev: check-prereqs cluster-up ## Start the local cluster (if needed) and the Tilt dev loop
-	tilt up
+	tilt up --debug --stream
 
 .PHONY: logs
 logs: ## Tail skillsd logs on the local cluster

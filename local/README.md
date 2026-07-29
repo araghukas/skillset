@@ -5,13 +5,25 @@ Support files for the local dev loop (`make dev` / `tilt up`): a `ctlptl`-manage
 
 ```
 local/
-├── cluster.yaml          # ctlptl spec: kind cluster "kind-skillsd" + registry "skillsd-registry"
-├── values.yaml            # Helm values override (replicaCount, logLevel, image, skillsRepo, registry)
-├── git-deploy-key         # optional, gitignored: SSH deploy key for a private skillsRepo
-├── git-deploy-key.pub     # optional, gitignored
-├── git-known-hosts        # optional, gitignored: generated via `make git-known-hosts`
-└── github-token           # optional, gitignored: GitHub token enabling skillsd-registry (see below)
+├── cluster.yaml                # ctlptl spec: kind cluster "kind-skillsd" + registry "skillsd-registry"
+├── values.yaml                 # Helm values override (replicaCount, logLevel, image, skillsRepo, registry)
+├── git-skillsd-token           # optional, gitignored: read-only GitHub token for a private skillsRepo
+└── git-skillsd-registry-token  # optional, gitignored: push + PR GitHub token enabling skillsd-registry (see below)
 ```
+
+Both tokens are fine-grained GitHub personal access tokens (Settings →
+Developer settings → Personal access tokens → Fine-grained tokens),
+[repository access](https://github.com/settings/personal-access-tokens/new)
+limited to the one skills repo:
+
+| File | Used by | Permissions |
+|---|---|---|
+| `git-skillsd-token` | `skillsd`'s read-only clone | `Contents: Read-only` |
+| `git-skillsd-registry-token` | `skillsd-registry`'s push + PR write path | `Contents: Read and write`, `Pull requests: Read and write` |
+
+If fine-grained tokens aren't available (e.g. an older GitHub Enterprise
+instance), a classic PAT with the `repo` scope works for either file too —
+`skillsd` just won't use anything beyond read access from it.
 
 See the root [README.md](../README.md) for the full local dev walkthrough
 (`make dev`, private-repo auth, teardown). This file covers talking to the
@@ -88,13 +100,13 @@ grpcurl -plaintext localhost:8080 grpc.health.v1.Health/Check
 
 ## Exercising skillsd-registry (proposals + PRs)
 
-`skillsd-registry` is enabled by default in the chart (`registry.enabled: true`), which means `tilt up` needs `registry.github.tokenSecret` set from the start - the chart's `required` guard fails the whole render without one. The Tiltfile only wires that secret up once `local/github-token` is present, so that file isn't optional for local dev anymore. To try it locally:
+`skillsd-registry` is enabled by default in the chart (`registry.enabled: true`), which means `tilt up` needs `registry.github.tokenSecret` set from the start - the chart's `required` guard fails the whole render without one. The Tiltfile only wires that secret up once `local/git-skillsd-registry-token` is present, so that file isn't optional for local dev anymore. To try it locally:
 
 1. Fill in `registry.skillsRepo.url` and `registry.github.owner`/`repo` in
    [values.yaml](values.yaml) - point them at a real (ideally throwaway)
    GitHub repo you can push branches and open PRs against.
 2. Drop a GitHub token with push + pull-request write access on that repo
-   at `local/github-token` (gitignored). The Tiltfile picks this up, creates
+   at `local/git-skillsd-registry-token` (gitignored). The Tiltfile picks this up, creates
    a Secret from it, and sets `registry.enabled=true` automatically - no
    `helm_set` flags to pass by hand.
 3. `tilt up`. Once `skillsd-registry` is healthy, it's forwarded at

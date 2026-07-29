@@ -69,18 +69,18 @@ Deploying it requires an HTTPS clone URL with push access and a GitHub token (us
 
 ## GitHub authentication
 
-The two components authenticate to GitHub differently, because they need different things from it:
+Both components authenticate to GitHub the same way — an HTTPS clone URL plus a GitHub token — just scoped to what each one actually needs:
 
 | | `skillsd` | `skillsd-registry` |
 |---|---|---|
 | Needs | `git clone` only | `git push` **and** the GitHub REST API (PR creation) |
-| Credential | SSH deploy key (optional) | GitHub token (required if `submitProposalEnabled`) |
-| Wired in via | `skillsRepo.existingSecret` (`ssh-privatekey` + `known_hosts`) | `registry.github.tokenSecret` (`GITHUB_TOKEN`) |
-| Required scope | Read-only | `Contents: read/write` + `Pull requests: read/write` (fine-grained), or `repo` (classic) |
+| Credential | GitHub token (optional) | GitHub token (required if `submitProposalEnabled`) |
+| Wired in via | `skillsRepo.tokenSecret` (`token`, used as an HTTPS Basic-auth password) | `registry.github.tokenSecret` (`GITHUB_TOKEN`) |
+| Required scope | `Contents: read` (fine-grained), or `repo` (classic, read access is still all that's used) | `Contents: read/write` + `Pull requests: read/write` (fine-grained), or `repo` (classic) |
 
-`skillsd`'s init container only ever reads the skills repo, so an SSH deploy key scoped to read-only access is sufficient — and it's left empty by default, since a public repo needs no auth at all.
+`skillsd`'s init container only ever reads the skills repo, so a token scoped to read-only access is sufficient — and it's left empty by default, since a public repo needs no auth at all.
 
-`skillsd-registry` needs to authenticate two different operations — the `git push` of a proposal branch and the GitHub API call that opens the pull request — and a single GitHub token can do both over HTTPS, which is why it uses that instead of an SSH key. Scope the token as narrowly as your GitHub plan allows: a fine-grained PAT limited to the one skills repo with `Contents` and `Pull requests` write access, or a classic PAT with `repo` scope if fine-grained tokens aren't available. Leaving `GITHUB_TOKEN`/`registry.github.tokenSecret` unset runs `skillsd-registry` in propose-only mode (`ProposeChange`, `GetProposal`, etc. still work; `SubmitProposal` is disabled).
+`skillsd-registry` needs to authenticate two different operations — the `git push` of a proposal branch and the GitHub API call that opens the pull request — and a single GitHub token can do both over HTTPS. Scope each token as narrowly as your GitHub plan allows: a fine-grained PAT limited to the one skills repo, with just `Contents: read` for `skillsd` or `Contents` + `Pull requests` write access for `skillsd-registry`, or a classic PAT with `repo` scope if fine-grained tokens aren't available. Leaving `GITHUB_TOKEN`/`registry.github.tokenSecret` unset runs `skillsd-registry` in propose-only mode (`ProposeChange`, `GetProposal`, etc. still work; `SubmitProposal` is disabled).
 
 ---
 
@@ -123,12 +123,12 @@ Both binaries load configuration from environment variables on startup.
 Local dev runs on a `kind` cluster provisioned by `ctlptl`, with `Tilt` handling build/deploy/live-reload. Requires `go`, `docker`, `kind`, `ctlptl`, `kubectl`, `helm`, `tilt`, and `buf` on `PATH`.
 
 ```bash
-make dev          # runs cluster-up, then `tilt up`
+make dev    # runs `cluster-up` followed by `tilt up`
 ```
 
-For a private skills repo, drop an SSH deploy key and its host's `known_hosts` at `local/git-deploy-key` / `local/git-known-hosts` (both gitignored) before running `make dev` — the Tiltfile creates a Secret from them and wires it into the chart automatically.
+For a private skills repo, drop a GitHub token scoped read-only to it at `local/git-skillsd-token` (gitignored) before running `make dev` — the Tiltfile creates a Secret from it and wires it into the chart automatically.
 
-To also exercise `skillsd-registry` locally, fill in `registry.skillsRepo.url` and `registry.github.owner`/`repo` in [local/values.yaml](local/values.yaml), then drop a GitHub token (push + pull-request write access on that repo) at `local/github-token` (gitignored) — the Tiltfile creates a Secret from it and sets `registry.enabled=true` automatically. See [local/README.md](local/README.md) for a full `grpcurl` walkthrough of `ProposalService`.
+To also exercise `skillsd-registry` locally, fill in `registry.skillsRepo.url` and `registry.github.owner`/`repo` in [local/values.yaml](local/values.yaml), then drop a GitHub token (push + pull-request write access on that repo) at `local/git-skillsd-registry-token` (gitignored) — the Tiltfile creates a Secret from it and sets `registry.enabled=true` automatically. See [local/README.md](local/README.md) for a full `grpcurl` walkthrough of `ProposalService`, including what scopes to put on each token.
 
 Run `make help` for the full list of targets (build, test, vet, proto codegen, docker build, helm lint/template, cluster teardown, log tailing, etc).
 

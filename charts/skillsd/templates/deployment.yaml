@@ -25,12 +25,6 @@ spec:
       volumes:
         - name: skills-data
           emptyDir: {}
-        {{- if .Values.skillsRepo.existingSecret }}
-        - name: git-secret
-          secret:
-            secretName: {{ .Values.skillsRepo.existingSecret }}
-            defaultMode: 0400
-        {{- end }}
       initContainers:
         - name: skills-clone
           image: {{ .Values.skillsRepo.cloneImage }}
@@ -38,10 +32,11 @@ spec:
           args:
             - |
               set -eu
-              {{- if .Values.skillsRepo.existingSecret }}
-              export GIT_SSH_COMMAND="ssh -i /etc/git-secret/ssh-privatekey -o UserKnownHostsFile=/etc/git-secret/known_hosts -o IdentitiesOnly=yes"
+              CLONE_URL="$GIT_URL"
+              {{- if .Values.skillsRepo.tokenSecret }}
+              CLONE_URL="https://x-access-token:${GIT_TOKEN}@${GIT_URL#https://}"
               {{- end }}
-              git clone --depth 1 --branch "$GIT_BRANCH" "$GIT_URL" "$SKILLS_DIR"
+              git clone --depth 1 --branch "$GIT_BRANCH" "$CLONE_URL" "$SKILLS_DIR"
           env:
             - name: GIT_URL
               value: {{ .Values.skillsRepo.url | quote }}
@@ -49,14 +44,16 @@ spec:
               value: {{ .Values.skillsRepo.branch | quote }}
             - name: SKILLS_DIR
               value: {{ .Values.mountPath | quote }}
+            {{- if .Values.skillsRepo.tokenSecret }}
+            - name: GIT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.skillsRepo.tokenSecret }}
+                  key: token
+            {{- end }}
           volumeMounts:
             - name: skills-data
               mountPath: {{ .Values.mountPath }}
-            {{- if .Values.skillsRepo.existingSecret }}
-            - name: git-secret
-              mountPath: /etc/git-secret
-              readOnly: true
-            {{- end }}
       containers:
         - name: skillsd
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"

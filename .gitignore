@@ -1,8 +1,7 @@
 .DS_Store
 
-/local/git-deploy-key*
-/local/git-known-hosts
-/local/github-token
+/local/git-skillsd-token
+/local/git-skillsd-registry-token
 *.pem
 *.key
 id_rsa*

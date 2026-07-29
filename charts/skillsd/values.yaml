@@ -26,8 +26,8 @@ service:
 # definitions into a shared, read-only (from the main container's
 # perspective) volume before skillsd starts.
 skillsRepo:
-  # url is the git repository containing skill definitions, e.g.
-  # "https://github.com/example/skills.git" or "git@github.com:example/skills.git".
+  # url is the HTTPS clone URL of the skills repository, e.g.
+  # "https://github.com/example/skills.git".
   url: ""
   # branch is checked out with a shallow (--depth 1) clone.
   branch: main
@@ -37,12 +37,11 @@ skillsRepo:
   # cloneImage must have git available on PATH.
   cloneImage: alpine/git:latest
 
-  # existingSecret, if set, is mounted read-only at /etc/git-secret and used
-  # for SSH-based authentication against a private repo. It must contain:
-  #   ssh-privatekey - a private key authorized to read the repo
-  #   known_hosts    - the git host's public key(s)
-  # Leave empty for public, unauthenticated HTTPS clones.
-  existingSecret: ""
+  # tokenSecret is the name of an existing secret containing a GitHub token
+  # (key "token") with read-only access to the repo - the same auth
+  # mechanism registry.github.tokenSecret uses below, just scoped to read
+  # instead of read/write. Leave empty for a public, unauthenticated clone.
+  tokenSecret: ""
 
 # mountPath is where the cloned repo is mounted in both the init container
 # (read-write) and the main container (read-only). Also set as SKILLS_DIR.
@@ -99,10 +98,10 @@ registry:
     storageClassName: ""
 
   skillsRepo:
-    # url is the HTTPS clone URL of the skills repository. Distinct from
-    # skillsRepo.url above (which may be ssh://): this component needs
-    # push access, authenticated via github.tokenSecret below rather than
-    # an SSH deploy key.
+    # url is the HTTPS clone URL of the skills repository. Usually the same
+    # value as skillsRepo.url above - kept as a separate field because this
+    # component needs push access (authenticated via github.tokenSecret
+    # below, a different, more privileged token than skillsRepo.tokenSecret).
     url: ""
     # baseBranch is the branch proposals fork from and pull requests target.
     baseBranch: main
@@ -122,7 +121,7 @@ registry:
     # against. Required only if submitProposalEnabled is true.
     owner: ""
     repo: ""
-    # tokenSecret is the name of an existingSecret containing a GitHub
+    # tokenSecret is the name of an existing secret containing a GitHub
     # token (key "token") with push and pull-request write access. Used for
     # both the HTTPS git push and the GitHub REST API - one credential
     # instead of two. Required only if submitProposalEnabled is true; leave
