@@ -7,47 +7,35 @@
 
 ---
 
-## Workspace Structure
+## Architecture
+
+```mermaid
+flowchart TB
+  Agent["AI Agent (pod)"]
+
+  subgraph K8s["Kubernetes cluster"]
+    Read["skillsd\nread fleet, N replicas\nSkillService: ListSkills, GetSkill"]
+    SkillsVol[("skills-data volume\n(emptyDir)")]
+    Write["skillsd-registry\nwrite path, 1 replica\nProposalService: ProposeChange, ListProposals,\nGetProposal, GetSkillAtRef, SubmitProposal"]
+    RepoVol[("repo-data volume\n(PersistentVolumeClaim)")]
+
+    Read -- reads --> SkillsVol
+    Write -- "reads / writes" --> RepoVol
+  end
+
+  GitHub[("GitHub\nremote skills repo\nmain + proposals/* branches\npull requests")]
+
+  Agent -- "SkillService (read)" --> Read
+  Agent -- "ProposalService (propose / submit)" --> Write
+
+  GitHub -- "git clone, read-only, once\n(init container)" --> SkillsVol
+  GitHub -- "git fetch base branch\n(periodic)" --> RepoVol
+  RepoVol -- "git push proposal branch" --> GitHub
+  Write -- "open pull request\n(REST API)" --> GitHub
 
 ```
-├── buf.gen.yaml           # Protobuf generation config using Buf
-├── buf.yaml                # Protobuf module definition
-├── Dockerfile               # Container definition; builds both skillsd and skillsd-registry
-├── Makefile                 # Entrypoint for build/test/local-cluster/deploy tasks (see `make help`)
-├── Tiltfile                  # Local dev loop (build, deploy, port-forward) via Tilt
-├── go.mod
-├── cmd/
-│   ├── skillsd/
-│   │   └── main.go         # Read-fleet gRPC server entry point & signal orchestrator
-│   └── skillsd-registry/
-│       └── main.go         # Proposal-service entry point; also runs the background base-branch fetch loop
-├── charts/
-│   └── skillsd/             # Helm chart: both Deployments (skillsd + optional skillsd-registry), Services, PVC
-├── local/
-│   ├── cluster.yaml         # ctlptl spec: local kind cluster + image registry
-│   └── values.yaml          # Helm values override used for local dev
-├── gen/                     # Generated gRPC code (DO NOT EDIT)
-│   └── skills/v1/
-│       ├── skills.pb.go
-│       ├── skills_grpc.pb.go
-│       ├── proposals.pb.go
-│       └── proposals_grpc.pb.go
-├── internal/
-│   ├── config/               # skillsd env-var configuration loading
-│   ├── registryconfig/         # skillsd-registry env-var configuration loading
-│   ├── registry/              # In-memory, atomically-swapped skill index (skillsd); parses SKILL.md
-│   ├── skillparse/              # Shared SKILL.md frontmatter parsing/validation, used by both registry and proposals
-│   ├── server/                 # gRPC SkillService implementation (skillsd)
-│   ├── storage/                # Backend abstraction: FSBackend (mounted volume), GitTreeBackend (a git commit's tree)
-│   ├── gitrepo/                  # Low-level git working-copy operations (clone/open, commit, diff, log, push)
-│   ├── proposals/                # Proposal branch-naming convention + orchestration, built on gitrepo
-│   ├── githubpr/                 # Minimal GitHub REST client for opening pull requests
-│   └── proposalserver/            # gRPC ProposalServiceServer implementation (skillsd-registry)
-└── proto/
-    └── skills/v1/
-        ├── skills.proto      # SkillService: ListSkills, GetSkill
-        └── proposals.proto   # ProposalService: ProposeChange, ListProposals, GetProposal, GetSkillAtRef, SubmitProposal
-```
+
+`skillsd` and `skillsd-registry` share one Helm chart ([charts/skillsd](charts/skillsd)) but run as independent Deployments — the read fleet scales horizontally and never mutates anything; the registry is a single writer serializing git operations on its own persistent volume. See [proto/skills/v1](proto/skills/v1) for the two services' full RPC definitions, and [internal/](internal/) for their implementations (`registry`/`server`/`storage` back `skillsd`; `gitrepo`/`proposals`/`githubpr`/`proposalserver`/`registryconfig` back `skillsd-registry`; `skillparse` is shared by both).
 
 ---
 
