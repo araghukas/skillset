@@ -67,6 +67,23 @@ Deploying it requires an HTTPS clone URL with push access and a GitHub token (us
 
 ---
 
+## GitHub authentication
+
+The two components authenticate to GitHub differently, because they need different things from it:
+
+| | `skillsd` | `skillsd-registry` |
+|---|---|---|
+| Needs | `git clone` only | `git push` **and** the GitHub REST API (PR creation) |
+| Credential | SSH deploy key (optional) | GitHub token (required if `submitProposalEnabled`) |
+| Wired in via | `skillsRepo.existingSecret` (`ssh-privatekey` + `known_hosts`) | `registry.github.tokenSecret` (`GITHUB_TOKEN`) |
+| Required scope | Read-only | `Contents: read/write` + `Pull requests: read/write` (fine-grained), or `repo` (classic) |
+
+`skillsd`'s init container only ever reads the skills repo, so an SSH deploy key scoped to read-only access is sufficient — and it's left empty by default, since a public repo needs no auth at all.
+
+`skillsd-registry` needs to authenticate two different operations — the `git push` of a proposal branch and the GitHub API call that opens the pull request — and a single GitHub token can do both over HTTPS, which is why it uses that instead of an SSH key. Scope the token as narrowly as your GitHub plan allows: a fine-grained PAT limited to the one skills repo with `Contents` and `Pull requests` write access, or a classic PAT with `repo` scope if fine-grained tokens aren't available. Leaving `GITHUB_TOKEN`/`registry.github.tokenSecret` unset runs `skillsd-registry` in propose-only mode (`ProposeChange`, `GetProposal`, etc. still work; `SubmitProposal` is disabled).
+
+---
+
 ## Configuration
 
 Both binaries load configuration from environment variables on startup.
