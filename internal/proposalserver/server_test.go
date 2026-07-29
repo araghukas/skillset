@@ -16,6 +16,8 @@ import (
 	"github.com/araghukas/skillset/internal/proposals"
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/object"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 func validSkillMD(name, description string) string {
@@ -81,7 +83,7 @@ func newTestServer(t *testing.T) (*Server, *httptest.Server, *http.Request, *[]b
 	t.Cleanup(gh.Close)
 
 	client := githubpr.New(gh.URL, "acme", "skills", "test-token")
-	return New(svc, client, branch), gh, lastReq, &lastBody
+	return New(svc, client, branch, true), gh, lastReq, &lastBody
 }
 
 func TestProposeChangeThenGetProposal(t *testing.T) {
@@ -193,5 +195,29 @@ func TestSubmitProposalUnknownBranchReturnsNotFound(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error for a nonexistent proposal")
+	}
+}
+
+func TestSubmitProposalDisabledReturnsFailedPrecondition(t *testing.T) {
+	s, _, _, _ := newTestServer(t)
+	s.submitProposalEnabled = false
+	ctx := context.Background()
+
+	p, err := s.ProposeChange(ctx, &skillsv1.ProposeChangeRequest{
+		SkillName:  "frontend-design",
+		AgentId:    "agent-1",
+		ProposalId: "fix-typo",
+		Files: []*skillsv1.FileChange{
+			{FilePath: "SKILL.md", Content: validSkillMD("frontend-design", "designs frontends, fixed")},
+		},
+		CommitMessage: "fix typo",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = s.SubmitProposal(ctx, &skillsv1.SubmitProposalRequest{Branch: p.Branch})
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("expected FailedPrecondition, got %v", err)
 	}
 }

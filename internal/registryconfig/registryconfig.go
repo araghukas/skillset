@@ -59,6 +59,13 @@ type Config struct {
 	// Enterprise deployments.
 	GitHubAPIBaseURL string
 
+	// SubmitProposalEnabled controls whether the ProposalService's
+	// SubmitProposal RPC is allowed to push branches and open pull
+	// requests. It's the SUBMIT_PROPOSAL_ENABLED env var (default true)
+	// AND-ed with whether GitHub auth (token/owner/repo) is actually
+	// configured.
+	SubmitProposalEnabled bool
+
 	// FetchInterval is how often the base branch is re-fetched from
 	// origin in the background.
 	FetchInterval time.Duration
@@ -106,6 +113,10 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("parsing MAX_FILE_CONTENT_BYTES: %w", err)
 	}
+	submitProposalRequested, err := getenvBool("SUBMIT_PROPOSAL_ENABLED", true)
+	if err != nil {
+		return Config{}, fmt.Errorf("parsing SUBMIT_PROPOSAL_ENABLED: %w", err)
+	}
 
 	cfg := Config{
 		GRPCAddr:                getenv("GRPC_ADDR", ":8081"),
@@ -127,15 +138,12 @@ func Load() (Config, error) {
 	if cfg.SkillsRepoURL == "" {
 		return Config{}, fmt.Errorf("SKILLS_REPO_URL is required")
 	}
-	if cfg.GitHubToken == "" {
-		return Config{}, fmt.Errorf("GITHUB_TOKEN is required")
-	}
-	if cfg.GitHubOwner == "" {
-		return Config{}, fmt.Errorf("GITHUB_OWNER is required")
-	}
-	if cfg.GitHubRepo == "" {
-		return Config{}, fmt.Errorf("GITHUB_REPO is required")
-	}
+
+	// GitHub auth is only required for SubmitProposal (pushing + opening a
+	// PR), not for the rest of the service. Rather than fail to start when
+	// it's absent, disable SubmitProposal.
+	cfg.SubmitProposalEnabled = submitProposalRequested &&
+		cfg.GitHubToken != "" && cfg.GitHubOwner != "" && cfg.GitHubRepo != ""
 
 	return cfg, nil
 }
@@ -153,4 +161,12 @@ func getenvInt(key string, fallback int) (int, error) {
 		return fallback, nil
 	}
 	return strconv.Atoi(v)
+}
+
+func getenvBool(key string, fallback bool) (bool, error) {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback, nil
+	}
+	return strconv.ParseBool(v)
 }

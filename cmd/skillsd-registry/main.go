@@ -48,6 +48,9 @@ func run() error {
 		return fmt.Errorf("opening skills repo: %w", err)
 	}
 	slog.Info("opened skills repo", "dir", cfg.RepoDir, "base_branch", cfg.SkillsRepoBaseBranch)
+	if !cfg.SubmitProposalEnabled {
+		slog.Warn("SubmitProposal is disabled: GitHub auth not configured or SUBMIT_PROPOSAL_ENABLED=false")
+	}
 
 	svc := proposals.New(repo, cfg.SkillsSubPath, cfg.MaxFileContentBytes)
 	gh := githubpr.New(cfg.GitHubAPIBaseURL, cfg.GitHubOwner, cfg.GitHubRepo, cfg.GitHubToken)
@@ -66,7 +69,7 @@ func run() error {
 		grpc.MaxRecvMsgSize(cfg.GRPCMaxRecvMsgSizeBytes),
 		grpc.MaxSendMsgSize(cfg.GRPCMaxSendMsgSizeBytes),
 	)
-	skillsv1.RegisterProposalServiceServer(grpcServer, proposalserver.New(svc, gh, cfg.SkillsRepoBaseBranch))
+	skillsv1.RegisterProposalServiceServer(grpcServer, proposalserver.New(svc, gh, cfg.SkillsRepoBaseBranch, cfg.SubmitProposalEnabled))
 	grpc_health_v1.RegisterHealthServer(grpcServer, healthSrv)
 	reflection.Register(grpcServer)
 

@@ -40,11 +40,40 @@ func TestLoadRequiresSkillsRepoURL(t *testing.T) {
 	}
 }
 
-func TestLoadRequiresGitHubToken(t *testing.T) {
+func TestLoadEnablesSubmitProposalWhenGitHubAuthPresent(t *testing.T) {
+	setRequiredEnv(t)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.SubmitProposalEnabled {
+		t.Fatal("expected SubmitProposalEnabled to be true when GitHub auth is fully configured")
+	}
+}
+
+func TestLoadDisablesSubmitProposalWhenGitHubTokenMissing(t *testing.T) {
 	setRequiredEnv(t)
 	t.Setenv("GITHUB_TOKEN", "")
 
-	if _, err := Load(); err == nil {
-		t.Fatal("expected error when GITHUB_TOKEN is unset")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.SubmitProposalEnabled {
+		t.Fatal("expected SubmitProposalEnabled to be false when GITHUB_TOKEN is unset")
+	}
+}
+
+func TestLoadDisablesSubmitProposalWhenExplicitlyDisabled(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("SUBMIT_PROPOSAL_ENABLED", "false")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.SubmitProposalEnabled {
+		t.Fatal("expected SubmitProposalEnabled to be false when SUBMIT_PROPOSAL_ENABLED=false")
 	}
 }

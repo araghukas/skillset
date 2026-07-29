@@ -19,15 +19,19 @@ import (
 type Server struct {
 	skillsv1.UnimplementedProposalServiceServer
 
-	proposals  *proposals.Service
-	github     *githubpr.Client
-	baseBranch string
+	proposals             *proposals.Service
+	github                *githubpr.Client
+	baseBranch            string
+	submitProposalEnabled bool
 }
 
 // New returns a Server backed by svc, opening pull requests via gh against
-// baseBranch.
-func New(svc *proposals.Service, gh *githubpr.Client, baseBranch string) *Server {
-	return &Server{proposals: svc, github: gh, baseBranch: baseBranch}
+// baseBranch. If submitProposalEnabled is false, SubmitProposal refuses all
+// requests instead of pushing branches or opening pull requests - the rest
+// of the service (ProposeChange, GetProposal, GetSkillAtRef, ...) is
+// unaffected.
+func New(svc *proposals.Service, gh *githubpr.Client, baseBranch string, submitProposalEnabled bool) *Server {
+	return &Server{proposals: svc, github: gh, baseBranch: baseBranch, submitProposalEnabled: submitProposalEnabled}
 }
 
 func (s *Server) ProposeChange(ctx context.Context, req *skillsv1.ProposeChangeRequest) (*skillsv1.Proposal, error) {
@@ -67,6 +71,10 @@ func (s *Server) GetSkillAtRef(ctx context.Context, req *skillsv1.GetSkillAtRefR
 // merge step and no proposal status to update - the pull request itself,
 // on GitHub, is the review mechanism from here on.
 func (s *Server) SubmitProposal(ctx context.Context, req *skillsv1.SubmitProposalRequest) (*skillsv1.SubmitProposalResponse, error) {
+	if !s.submitProposalEnabled {
+		return nil, status.Error(codes.FailedPrecondition, "submitting proposals is disabled on this registry")
+	}
+
 	p, err := s.proposals.GetProposal(ctx, req.GetBranch())
 	if err != nil {
 		return nil, status.Error(codes.NotFound, err.Error())

@@ -110,15 +110,23 @@ registry:
     # directories actually live. Leave empty if skills sit at the repo root.
     subPath: skills
 
+  # submitProposalEnabled controls whether the SubmitProposal RPC is allowed
+  # to push a proposal's branch and open a pull request. ProposeChange,
+  # GetProposal, ListProposals, and GetSkillAtRef all work regardless -
+  # this only gates the final push+PR step. Leaving github.tokenSecret
+  # unset is by itself enough to run in propose-only mode.
+  submitProposalEnabled: true
+
   github:
     # owner/repo identify the GitHub repository pull requests are opened
-    # against.
+    # against. Required only if submitProposalEnabled is true.
     owner: ""
     repo: ""
     # tokenSecret is the name of an existingSecret containing a GitHub
     # token (key "token") with push and pull-request write access. Used for
     # both the HTTPS git push and the GitHub REST API - one credential
-    # instead of two.
+    # instead of two. Required only if submitProposalEnabled is true; leave
+    # empty to run with SubmitProposal disabled.
     tokenSecret: ""
     # apiBaseURL overrides the GitHub API base, for GitHub Enterprise.
     apiBaseURL: "https://api.github.com"
