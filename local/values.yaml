@@ -21,6 +21,11 @@ skillsRepo:
 # Tiltfile) - fill in skillsRepo.url/github.owner+repo here first if you
 # want to exercise the proposal/PR write path locally.
 registry:
+  image:
+    repository: localhost:5005/skillsd
+    tag: dev
+    pullPolicy: IfNotPresent
+
   skillsRepo:
     # HTTPS, not ssh:// - registry.github.tokenSecret authenticates both
     # the push and the PR API. Needs push access on whatever repo/branch
