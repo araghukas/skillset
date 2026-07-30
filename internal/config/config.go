@@ -32,6 +32,14 @@ type Config struct {
 	// actually live. Leave empty if skills sit at the repo root.
 	SkillsSubPath string
 
+	// SkillsCommit overrides the commit SHA stamped onto every served
+	// skill. Normally left unset: skillsd reads HEAD out of the cloned
+	// SkillsDir itself. Set it when the skills directory isn't a git
+	// working copy (a baked image layer, a ConfigMap) but the revision is
+	// still known to whoever built it - without a commit, outcome reports
+	// about these skills can't be attributed to a version.
+	SkillsCommit string
+
 	// GRPCMaxRecvMsgSizeBytes caps the size of a single incoming gRPC
 	// message (grpc.MaxRecvMsgSize).
 	GRPCMaxRecvMsgSizeBytes int
@@ -67,6 +75,7 @@ func Load() (Config, error) {
 		GRPCAddr:                getenv("GRPC_ADDR", ":8080"),
 		SkillsDir:               getenv("SKILLS_DIR", "/skills"),
 		SkillsSubPath:           getenv("SKILLS_SUBPATH", ""),
+		SkillsCommit:            getenv("SKILLS_COMMIT", ""),
 		GRPCMaxRecvMsgSizeBytes: maxRecvMsgSize,
 		GRPCMaxSendMsgSizeBytes: maxSendMsgSize,
 		LogLevel:                level,

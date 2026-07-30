@@ -47,6 +47,14 @@ message SkillMetadata {
   string allowed_tools = 6;            // Optional, experimental; space-separated pre-approved tools
   string json_schema = 7;              // Optional; convenience projection of metadata["json_schema"], for skills that also expose a strict function-call interface
   repeated SkillContextFile context_files = 8; // SKILL.md plus any scripts/, references/, assets/ files
+
+  // commit is the git commit SHA this skill's content was read at - the
+  // revision the serving process cloned (skillsd) or the ref that was
+  // resolved (GetSkillAtRef). Echo it back in EvidenceService.ReportOutcome:
+  // an outcome attached to a skill name alone can't distinguish a skill that
+  // was always broken from one a recent edit broke. Empty only if the server
+  // could not determine the revision it is serving.
+  string commit = 9;
 }
 
 // ==========================================

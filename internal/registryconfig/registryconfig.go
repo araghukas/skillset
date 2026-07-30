@@ -66,9 +66,50 @@ type Config struct {
 	// configured.
 	SubmitProposalEnabled bool
 
+	// AutoSubmitEndorsements is how many agents must independently arrive
+	// at identical content before a pull request is opened for it without
+	// anyone asking. Zero (the default) disables auto-submission entirely.
+	//
+	// This is the only setting that lets the registry act on its own, and
+	// it is exactly as trustworthy as agent_id is: with self-asserted
+	// identities, one misbehaving caller can manufacture a threshold's
+	// worth of agreement by itself. Enable it once callers are
+	// authenticated, not before.
+	AutoSubmitEndorsements int32
+
 	// FetchInterval is how often the base branch is re-fetched from
 	// origin in the background.
 	FetchInterval time.Duration
+
+	// EvidenceEnabled controls whether EvidenceService is served at all.
+	// Disabled, its RPCs return Unimplemented and no database is opened;
+	// everything else about the registry is unaffected.
+	EvidenceEnabled bool
+
+	// EvidenceDBPath is the SQLite file outcome reports are stored in.
+	// Unlike RepoDir, whose contents are a cache of a git remote, nothing
+	// upstream can reconstruct this file - see internal/evidence.
+	EvidenceDBPath string
+
+	// EvidenceVerifyCommits makes ReportOutcome reject reports naming a
+	// skill/commit pair the repository doesn't contain.
+	EvidenceVerifyCommits bool
+
+	// EvidenceRetention is how long raw reports are kept before being
+	// folded into aggregate counts and deleted. Zero disables the rollup,
+	// which lets the database grow without bound - only reasonable for a
+	// short-lived test deployment.
+	EvidenceRetention time.Duration
+
+	// EvidenceRollupInterval is how often the retention pass runs.
+	EvidenceRollupInterval time.Duration
+
+	// EvidenceBackupPath is where periodic snapshots of the evidence
+	// database are written. Empty disables snapshots.
+	EvidenceBackupPath string
+
+	// EvidenceBackupInterval is how often a snapshot is taken.
+	EvidenceBackupInterval time.Duration
 
 	// GRPCMaxRecvMsgSizeBytes caps the size of a single incoming gRPC
 	// message (grpc.MaxRecvMsgSize) - the whole ProposeChangeRequest,
@@ -117,6 +158,30 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("parsing SUBMIT_PROPOSAL_ENABLED: %w", err)
 	}
+	autoSubmitEndorsements, err := getenvInt("AUTO_SUBMIT_ENDORSEMENTS", 0)
+	if err != nil {
+		return Config{}, fmt.Errorf("parsing AUTO_SUBMIT_ENDORSEMENTS: %w", err)
+	}
+	evidenceEnabled, err := getenvBool("EVIDENCE_ENABLED", true)
+	if err != nil {
+		return Config{}, fmt.Errorf("parsing EVIDENCE_ENABLED: %w", err)
+	}
+	evidenceVerifyCommits, err := getenvBool("EVIDENCE_VERIFY_COMMITS", true)
+	if err != nil {
+		return Config{}, fmt.Errorf("parsing EVIDENCE_VERIFY_COMMITS: %w", err)
+	}
+	evidenceRetention, err := time.ParseDuration(getenv("EVIDENCE_RETENTION", "2160h")) // 90 days
+	if err != nil {
+		return Config{}, fmt.Errorf("parsing EVIDENCE_RETENTION: %w", err)
+	}
+	evidenceRollupInterval, err := time.ParseDuration(getenv("EVIDENCE_ROLLUP_INTERVAL", "24h"))
+	if err != nil {
+		return Config{}, fmt.Errorf("parsing EVIDENCE_ROLLUP_INTERVAL: %w", err)
+	}
+	evidenceBackupInterval, err := time.ParseDuration(getenv("EVIDENCE_BACKUP_INTERVAL", "24h"))
+	if err != nil {
+		return Config{}, fmt.Errorf("parsing EVIDENCE_BACKUP_INTERVAL: %w", err)
+	}
 
 	cfg := Config{
 		GRPCAddr:                getenv("GRPC_ADDR", ":8081"),
@@ -128,7 +193,15 @@ func Load() (Config, error) {
 		GitHubOwner:             getenv("GITHUB_OWNER", ""),
 		GitHubRepo:              getenv("GITHUB_REPO", ""),
 		GitHubAPIBaseURL:        getenv("GITHUB_API_BASE_URL", "https://api.github.com"),
+		AutoSubmitEndorsements:  int32(autoSubmitEndorsements),
 		FetchInterval:           fetchInterval,
+		EvidenceEnabled:         evidenceEnabled,
+		EvidenceDBPath:          getenv("EVIDENCE_DB_PATH", "/var/lib/skillsd-evidence/evidence.db"),
+		EvidenceVerifyCommits:   evidenceVerifyCommits,
+		EvidenceRetention:       evidenceRetention,
+		EvidenceRollupInterval:  evidenceRollupInterval,
+		EvidenceBackupPath:      getenv("EVIDENCE_BACKUP_PATH", ""),
+		EvidenceBackupInterval:  evidenceBackupInterval,
 		GRPCMaxRecvMsgSizeBytes: maxRecvMsgSize,
 		GRPCMaxSendMsgSizeBytes: maxSendMsgSize,
 		MaxFileContentBytes:     maxFileContentBytes,

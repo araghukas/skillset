@@ -95,6 +95,13 @@ type SkillMetadata struct {
 	AllowedTools  string                 `protobuf:"bytes,6,opt,name=allowed_tools,json=allowedTools,proto3" json:"allowed_tools,omitempty"`                                               // Optional, experimental; space-separated pre-approved tools
 	JsonSchema    string                 `protobuf:"bytes,7,opt,name=json_schema,json=jsonSchema,proto3" json:"json_schema,omitempty"`                                                     // Optional; convenience projection of metadata["json_schema"], for skills that also expose a strict function-call interface
 	ContextFiles  []*SkillContextFile    `protobuf:"bytes,8,rep,name=context_files,json=contextFiles,proto3" json:"context_files,omitempty"`                                               // SKILL.md plus any scripts/, references/, assets/ files
+	// commit is the git commit SHA this skill's content was read at - the
+	// revision the serving process cloned (skillsd) or the ref that was
+	// resolved (GetSkillAtRef). Echo it back in EvidenceService.ReportOutcome:
+	// an outcome attached to a skill name alone can't distinguish a skill that
+	// was always broken from one a recent edit broke. Empty only if the server
+	// could not determine the revision it is serving.
+	Commit        string `protobuf:"bytes,9,opt,name=commit,proto3" json:"commit,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -183,6 +190,13 @@ func (x *SkillMetadata) GetContextFiles() []*SkillContextFile {
 		return x.ContextFiles
 	}
 	return nil
+}
+
+func (x *SkillMetadata) GetCommit() string {
+	if x != nil {
+		return x.Commit
+	}
+	return ""
 }
 
 type ListSkillsRequest struct {
@@ -431,7 +445,7 @@ const file_skills_v1_skills_proto_rawDesc = "" +
 	"\x10SkillContextFile\x12\x1b\n" +
 	"\tfile_path\x18\x01 \x01(\tR\bfilePath\x12\x18\n" +
 	"\acontent\x18\x02 \x01(\tR\acontent\x12\x1b\n" +
-	"\tmime_type\x18\x03 \x01(\tR\bmimeType\"\x8e\x03\n" +
+	"\tmime_type\x18\x03 \x01(\tR\bmimeType\"\xa6\x03\n" +
 	"\rSkillMetadata\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
 	"\vdescription\x18\x02 \x01(\tR\vdescription\x12\x18\n" +
@@ -441,7 +455,8 @@ const file_skills_v1_skills_proto_rawDesc = "" +
 	"\rallowed_tools\x18\x06 \x01(\tR\fallowedTools\x12\x1f\n" +
 	"\vjson_schema\x18\a \x01(\tR\n" +
 	"jsonSchema\x12@\n" +
-	"\rcontext_files\x18\b \x03(\v2\x1b.skills.v1.SkillContextFileR\fcontextFiles\x1a;\n" +
+	"\rcontext_files\x18\b \x03(\v2\x1b.skills.v1.SkillContextFileR\fcontextFiles\x12\x16\n" +
+	"\x06commit\x18\t \x01(\tR\x06commit\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"c\n" +

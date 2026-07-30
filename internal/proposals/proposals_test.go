@@ -84,7 +84,7 @@ func validSkillMD(name, description string) string {
 func TestProposeChangeCreatesProposal(t *testing.T) {
 	svc, _ := newTestService(t, "frontend-design", validSkillMD("frontend-design", "designs frontends"))
 
-	p, err := svc.ProposeChange(context.Background(), &skillsv1.ProposeChangeRequest{
+	res, err := svc.ProposeChange(context.Background(), &skillsv1.ProposeChangeRequest{
 		SkillName:  "frontend-design",
 		AgentId:    "agent-1",
 		ProposalId: "fix-typo",
@@ -97,6 +97,7 @@ func TestProposeChangeCreatesProposal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	p := res.Proposal
 	if p.Branch != "proposals/agent-1/frontend-design/fix-typo" {
 		t.Fatalf("unexpected branch: %q", p.Branch)
 	}
@@ -200,10 +201,11 @@ func TestProposeChangeAppendsSecondCommitOnRepeatCall(t *testing.T) {
 	if _, err := svc.ProposeChange(ctx, req("v1")); err != nil {
 		t.Fatal(err)
 	}
-	p, err := svc.ProposeChange(ctx, req("v2"))
+	res, err := svc.ProposeChange(ctx, req("v2"))
 	if err != nil {
 		t.Fatal(err)
 	}
+	p := res.Proposal
 	if len(p.Commits) != 2 {
 		t.Fatalf("expected 2 commits after two ProposeChange calls on the same proposal, got %d", len(p.Commits))
 	}
@@ -268,7 +270,7 @@ func TestGetSkillAtRefResolvesBaseAndProposalBranch(t *testing.T) {
 		t.Fatalf("expected base description %q, got %q", "original", atBase.Description)
 	}
 
-	p, err := svc.ProposeChange(ctx, &skillsv1.ProposeChangeRequest{
+	res, err := svc.ProposeChange(ctx, &skillsv1.ProposeChangeRequest{
 		SkillName:  "frontend-design",
 		AgentId:    "agent-1",
 		ProposalId: "update-desc",
@@ -281,7 +283,7 @@ func TestGetSkillAtRefResolvesBaseAndProposalBranch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	atProposal, err := svc.GetSkillAtRef(ctx, "frontend-design", p.Branch, false)
+	atProposal, err := svc.GetSkillAtRef(ctx, "frontend-design", res.Proposal.Branch, false)
 	if err != nil {
 		t.Fatal(err)
 	}

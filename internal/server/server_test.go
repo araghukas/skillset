@@ -29,7 +29,7 @@ func newTestServer(t *testing.T) *Server {
 	writeSkill(t, root, "frontend-design", "---\nname: frontend-design\ndescription: designs frontends\nmetadata:\n  category: design\n---\nbody\n")
 	writeSkill(t, root, "uncategorized", "---\nname: uncategorized\ndescription: no category set\n---\nbody\n")
 
-	reg := registry.New(storage.NewFSBackend(root), "")
+	reg := registry.New(storage.NewFSBackend(root), "", "")
 	if _, err := reg.Load(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +112,7 @@ func TestGetSkillWithBinaryAssetDoesNotFail(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reg := registry.New(storage.NewFSBackend(root), "")
+	reg := registry.New(storage.NewFSBackend(root), "", "")
 	if _, err := reg.Load(context.Background()); err != nil {
 		t.Fatal(err)
 	}

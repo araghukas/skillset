@@ -7,10 +7,13 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
 	skillsv1 "github.com/araghukas/skillset/gen/skills/v1"
+	"github.com/araghukas/skillset/internal/evidence"
+	"github.com/araghukas/skillset/internal/evidenceserver"
 	"github.com/araghukas/skillset/internal/githubpr"
 	"github.com/araghukas/skillset/internal/gitrepo"
 	"github.com/araghukas/skillset/internal/proposals"
@@ -55,6 +58,11 @@ func run() error {
 	svc := proposals.New(repo, cfg.SkillsSubPath, cfg.MaxFileContentBytes)
 	gh := githubpr.New(cfg.GitHubAPIBaseURL, cfg.GitHubOwner, cfg.GitHubRepo, cfg.GitHubToken)
 
+	if cfg.AutoSubmitEndorsements > 0 {
+		slog.Warn("auto-submission is enabled: proposals corroborated by enough agents will open pull requests unprompted",
+			"threshold", cfg.AutoSubmitEndorsements)
+	}
+
 	go refreshBaseLoop(ctx, repo, cfg.FetchInterval)
 
 	healthSrv := health.NewServer()
@@ -69,7 +77,28 @@ func run() error {
 		grpc.MaxRecvMsgSize(cfg.GRPCMaxRecvMsgSizeBytes),
 		grpc.MaxSendMsgSize(cfg.GRPCMaxSendMsgSizeBytes),
 	)
-	skillsv1.RegisterProposalServiceServer(grpcServer, proposalserver.New(svc, gh, cfg.SkillsRepoBaseBranch, cfg.SubmitProposalEnabled))
+	skillsv1.RegisterProposalServiceServer(grpcServer, proposalserver.New(
+		svc, gh, cfg.SkillsRepoBaseBranch, cfg.SubmitProposalEnabled, cfg.AutoSubmitEndorsements))
+
+	// EvidenceService is optional: without it the registry is still a
+	// complete proposal path, just one whose pull requests arrive without
+	// the field data that motivated them.
+	if cfg.EvidenceEnabled {
+		store, err := openEvidence(ctx, cfg)
+		if err != nil {
+			return err
+		}
+		defer store.Close()
+
+		skillsv1.RegisterEvidenceServiceServer(grpcServer,
+			evidenceserver.New(store, svc, cfg.EvidenceVerifyCommits))
+
+		go retentionLoop(ctx, store, cfg.EvidenceRollupInterval, cfg.EvidenceRetention)
+		go backupLoop(ctx, store, cfg.EvidenceBackupPath, cfg.EvidenceBackupInterval)
+	} else {
+		slog.Info("EvidenceService is disabled; no outcome reports will be collected")
+	}
+
 	grpc_health_v1.RegisterHealthServer(grpcServer, healthSrv)
 	reflection.Register(grpcServer)
 
@@ -81,6 +110,96 @@ func run() error {
 
 	slog.Info("skillsd-registry listening", "addr", cfg.GRPCAddr)
 	return grpcServer.Serve(lis)
+}
+
+// openEvidence opens the outcome-report database, creating its parent
+// directory if the volume is mounted empty.
+func openEvidence(ctx context.Context, cfg registryconfig.Config) (*evidence.Store, error) {
+	if dir := filepath.Dir(cfg.EvidenceDBPath); dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return nil, fmt.Errorf("creating evidence directory %s: %w", dir, err)
+		}
+	}
+
+	store, err := evidence.Open(ctx, cfg.EvidenceDBPath)
+	if err != nil {
+		return nil, fmt.Errorf("opening evidence store: %w", err)
+	}
+	slog.Info("opened evidence store", "path", cfg.EvidenceDBPath,
+		"verify_commits", cfg.EvidenceVerifyCommits, "retention", cfg.EvidenceRetention)
+	return store, nil
+}
+
+// retentionLoop folds reports older than the retention window into
+// aggregate counts and deletes the raw rows.
+//
+// Left unbounded, raw reports accumulate until the volume fills, and the
+// failure surfaces as a registry that can no longer accept writes. Rolling
+// them up keeps the signal - which is what anyone actually queries - while
+// bounding the file.
+func retentionLoop(ctx context.Context, store *evidence.Store, interval, retention time.Duration) {
+	if retention <= 0 {
+		slog.Warn("evidence retention is disabled; the database will grow without bound")
+		return
+	}
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			n, err := store.Rollup(ctx, time.Now().Add(-retention))
+			if err != nil {
+				slog.Error("evidence rollup failed", "error", err)
+				continue
+			}
+			if n > 0 {
+				slog.Info("rolled up aged outcome reports", "reports", n, "retention", retention)
+			}
+		}
+	}
+}
+
+// backupLoop periodically snapshots the evidence database.
+//
+// Everything else this component owns is a cache of a git remote and can be
+// rebuilt by re-cloning. Outcome reports cannot: they are observations that
+// exist in exactly one place. Each run replaces the previous snapshot, so
+// the destination should be somewhere that outlives the pod.
+func backupLoop(ctx context.Context, store *evidence.Store, path string, interval time.Duration) {
+	if path == "" {
+		slog.Warn("evidence backups are disabled; outcome reports exist only on this volume and cannot be reconstructed if it is lost",
+			"hint", "set EVIDENCE_BACKUP_PATH")
+		return
+	}
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			// VACUUM INTO refuses to overwrite, so the previous snapshot is
+			// swapped out only once the new one has been written in full -
+			// there is never a moment with no usable backup on disk.
+			tmp := path + ".tmp"
+			_ = os.Remove(tmp)
+			if err := store.Backup(ctx, tmp); err != nil {
+				slog.Error("evidence backup failed", "error", err)
+				continue
+			}
+			if err := os.Rename(tmp, path); err != nil {
+				slog.Error("could not replace previous evidence backup", "error", err)
+				continue
+			}
+			slog.Info("wrote evidence backup", "path", path)
+		}
+	}
 }
 
 // refreshBaseLoop periodically re-fetches the base branch from origin so

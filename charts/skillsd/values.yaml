@@ -116,6 +116,67 @@ registry:
   # unset is by itself enough to run in propose-only mode.
   submitProposalEnabled: true
 
+  # autoSubmitEndorsements is how many agents must independently arrive at
+  # byte-identical content before a pull request is opened for it with
+  # nobody asking. When a second agent proposes content that already exists,
+  # it doesn't get its own branch: it's recorded as an endorsement of the
+  # first, and this counts those endorsements.
+  #
+  # 0 (the default) disables it, and that default is deliberate. This is the
+  # only setting that lets the registry act on its own, and it is exactly as
+  # trustworthy as agent_id is - with self-asserted identities, a single
+  # misconfigured caller can manufacture a threshold's worth of agreement by
+  # itself. Turn it on once callers are authenticated.
+  autoSubmitEndorsements: 0
+
+  # evidence configures EvidenceService: the store of agent outcome reports
+  # that turns "an agent wants to change this skill" into "this version of
+  # the skill was cited by N reported sessions and contradicted reality in
+  # M% of them". It is the only part of skillset whose data is not derived
+  # from git - see persistence and backup below.
+  evidence:
+    enabled: true
+
+    # dbPath is the SQLite file, inside the evidence volume below.
+    dbPath: /var/lib/skillsd-evidence/evidence.db
+
+    # verifyCommits makes ReportOutcome reject reports naming a
+    # skill/commit pair the repository doesn't contain. This is the main
+    # thing keeping a misconfigured agent from quietly filling the store
+    # with rows that look like signal.
+    #
+    # A report can be rejected simply for naming a commit newer than the
+    # registry's last fetch of the base branch; that returns
+    # FailedPrecondition, and since report IDs make retries idempotent, the
+    # agent's correct response is to retry shortly.
+    verifyCommits: true
+
+    # retention is how long individual reports are kept before being folded
+    # into per-(skill, commit, verdict) counts and deleted. The aggregate
+    # signal survives forever; the free-text notes and individual report
+    # IDs do not.
+    #
+    # Setting this to 0 disables the rollup and lets the database grow
+    # without bound, which surfaces as a registry that can no longer accept
+    # writes. Only reasonable for a short-lived test deployment.
+    retention: 2160h # 90 days
+    rollupInterval: 24h
+
+    persistence:
+      enabled: true
+      size: 1Gi
+      storageClassName: ""
+
+    backup:
+      # path is where periodic snapshots are written. Empty disables them.
+      #
+      # Worth setting to something that isn't the evidence volume itself: a
+      # snapshot sitting on the disk it is meant to protect against losing
+      # is not a backup. Point it at a second volume, or at a path your
+      # cluster's backup tooling already collects.
+      path: ""
+      interval: 24h
+
   github:
     # owner/repo identify the GitHub repository pull requests are opened
     # against. Required only if submitProposalEnabled is true.

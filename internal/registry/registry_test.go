@@ -46,7 +46,7 @@ func TestLoadWithPrefix(t *testing.T) {
 	skillsDir := filepath.Join(root, "skills")
 	writeSkill(t, skillsDir, "frontend-design", "---\nname: frontend-design\ndescription: test desc\n---\nbody\n")
 
-	reg := New(storage.NewFSBackend(root), "skills")
+	reg := New(storage.NewFSBackend(root), "skills", "")
 	n, err := reg.Load(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -74,7 +74,7 @@ func TestLoadWithoutPrefix(t *testing.T) {
 	root := t.TempDir()
 	writeSkill(t, root, "frontend-design", "---\nname: frontend-design\ndescription: test desc\n---\nbody\n")
 
-	reg := New(storage.NewFSBackend(root), "")
+	reg := New(storage.NewFSBackend(root), "", "")
 	n, err := reg.Load(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -98,7 +98,7 @@ func TestLoadSkipsNonUTF8ContextFiles(t *testing.T) {
 	// 0xFF 0xFE is not valid UTF-8 in any position.
 	writeSkillFile(t, root, "with-binary-asset", "assets/logo.png", []byte{0x89, 0x50, 0x4E, 0x47, 0xFF, 0xFE, 0x00, 0x01})
 
-	reg := New(storage.NewFSBackend(root), "")
+	reg := New(storage.NewFSBackend(root), "", "")
 	n, err := reg.Load(context.Background())
 	if err != nil {
 		t.Fatalf("expected load to succeed despite binary asset, got: %v", err)
@@ -145,7 +145,7 @@ func TestLoadFailsWhenSkillMdItselfIsNotUTF8(t *testing.T) {
 	content := append([]byte("---\nname: odd-body\ndescription: has invalid utf8 in body\n---\nbody "), 0xFF, 0xFE)
 	writeSkillFile(t, root, "odd-body", skillparse.SkillFileName, content)
 
-	reg := New(storage.NewFSBackend(root), "")
+	reg := New(storage.NewFSBackend(root), "", "")
 	n, err := reg.Load(context.Background())
 	if err != nil {
 		t.Fatalf("expected load to succeed, got: %v", err)

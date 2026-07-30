@@ -35,6 +35,18 @@ spec:
         - name: repo-data
           persistentVolumeClaim:
             claimName: {{ include "skillsd.registryFullname" . }}
+        {{- if .Values.registry.evidence.enabled }}
+        - name: evidence-data
+          {{- if .Values.registry.evidence.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "skillsd.registryFullname" . }}-evidence
+          {{- else }}
+          # Without a claim, outcome reports live only as long as the pod.
+          # Fine for a demo; in any real deployment this is the difference
+          # between having an observation history and not.
+          emptyDir: {}
+          {{- end }}
+        {{- end }}
       containers:
         - name: skillsd-registry
           image: "{{ .Values.registry.image.repository }}:{{ .Values.registry.image.tag }}"
@@ -62,8 +74,26 @@ spec:
               value: {{ .Values.registry.github.apiBaseURL | quote }}
             - name: SUBMIT_PROPOSAL_ENABLED
               value: {{ .Values.registry.submitProposalEnabled | quote }}
+            - name: AUTO_SUBMIT_ENDORSEMENTS
+              value: {{ .Values.registry.autoSubmitEndorsements | quote }}
             - name: FETCH_INTERVAL
               value: {{ .Values.registry.fetchInterval | quote }}
+            - name: EVIDENCE_ENABLED
+              value: {{ .Values.registry.evidence.enabled | quote }}
+            {{- if .Values.registry.evidence.enabled }}
+            - name: EVIDENCE_DB_PATH
+              value: {{ .Values.registry.evidence.dbPath | quote }}
+            - name: EVIDENCE_VERIFY_COMMITS
+              value: {{ .Values.registry.evidence.verifyCommits | quote }}
+            - name: EVIDENCE_RETENTION
+              value: {{ .Values.registry.evidence.retention | quote }}
+            - name: EVIDENCE_ROLLUP_INTERVAL
+              value: {{ .Values.registry.evidence.rollupInterval | quote }}
+            - name: EVIDENCE_BACKUP_PATH
+              value: {{ .Values.registry.evidence.backup.path | quote }}
+            - name: EVIDENCE_BACKUP_INTERVAL
+              value: {{ .Values.registry.evidence.backup.interval | quote }}
+            {{- end }}
             - name: GRPC_MAX_RECV_MSG_SIZE_BYTES
               value: {{ mul .Values.registry.grpcMaxRecvMsgSizeMiB 1048576 | quote }}
             - name: GRPC_MAX_SEND_MSG_SIZE_BYTES
@@ -83,6 +113,10 @@ spec:
           volumeMounts:
             - name: repo-data
               mountPath: {{ .Values.registry.repoDir }}
+            {{- if .Values.registry.evidence.enabled }}
+            - name: evidence-data
+              mountPath: {{ .Values.registry.evidence.dbPath | dir }}
+            {{- end }}
           readinessProbe:
             grpc:
               port: {{ .Values.registry.service.port }}

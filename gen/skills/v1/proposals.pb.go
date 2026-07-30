@@ -154,6 +154,83 @@ func (x *CommitInfo) GetAuthoredAt() *timestamppb.Timestamp {
 	return nil
 }
 
+// Endorsement records that an agent independently arrived at exactly the
+// content a proposal already contains. There is deliberately no RPC to
+// endorse a proposal you have merely read and agreed with: an endorsement is
+// only meaningful as evidence if it was produced without knowledge of the
+// proposal it lands on, so the only way to create one is for ProposeChange
+// to find your content already there.
+//
+// Endorsements live in git as refs under refs/endorsements/, not in a
+// database, so they survive exactly as long as the repository does.
+type Endorsement struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AgentId       string                 `protobuf:"bytes,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	EndorsedSha   string                 `protobuf:"bytes,2,opt,name=endorsed_sha,json=endorsedSha,proto3" json:"endorsed_sha,omitempty"` // Proposal head at the moment of endorsement
+	Stale         bool                   `protobuf:"varint,3,opt,name=stale,proto3" json:"stale,omitempty"`                               // True if the proposal has advanced since; stale endorsements don't count toward the auto-submit threshold
+	EndorsedAt    *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=endorsed_at,json=endorsedAt,proto3" json:"endorsed_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Endorsement) Reset() {
+	*x = Endorsement{}
+	mi := &file_skills_v1_proposals_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Endorsement) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Endorsement) ProtoMessage() {}
+
+func (x *Endorsement) ProtoReflect() protoreflect.Message {
+	mi := &file_skills_v1_proposals_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Endorsement.ProtoReflect.Descriptor instead.
+func (*Endorsement) Descriptor() ([]byte, []int) {
+	return file_skills_v1_proposals_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *Endorsement) GetAgentId() string {
+	if x != nil {
+		return x.AgentId
+	}
+	return ""
+}
+
+func (x *Endorsement) GetEndorsedSha() string {
+	if x != nil {
+		return x.EndorsedSha
+	}
+	return ""
+}
+
+func (x *Endorsement) GetStale() bool {
+	if x != nil {
+		return x.Stale
+	}
+	return false
+}
+
+func (x *Endorsement) GetEndorsedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.EndorsedAt
+	}
+	return nil
+}
+
 // Proposal is a single agent's line of edits to one skill, tracked as a
 // branch in the underlying git repository.
 type Proposal struct {
@@ -168,13 +245,27 @@ type Proposal struct {
 	Commits         []*CommitInfo          `protobuf:"bytes,8,rep,name=commits,proto3" json:"commits,omitempty"`
 	SourceThreadUri string                 `protobuf:"bytes,9,opt,name=source_thread_uri,json=sourceThreadUri,proto3" json:"source_thread_uri,omitempty"` // Pointer to the agent's uploaded conversation JSON, if provided
 	UpdatedAt       *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// content_hash is a normalized digest of every file in the skill's
+	// directory at head_sha. Two proposals with the same content_hash produce
+	// the same skill, whatever route they took to get there; it's the key
+	// ProposeChange deduplicates on.
+	ContentHash string `protobuf:"bytes,11,opt,name=content_hash,json=contentHash,proto3" json:"content_hash,omitempty"`
+	// endorsements are other agents that independently produced this exact
+	// content. The proposing agent is not counted among them.
+	Endorsements []*Endorsement `protobuf:"bytes,12,rep,name=endorsements,proto3" json:"endorsements,omitempty"`
+	// corroboration is 1 (the proposing agent) plus the number of non-stale
+	// endorsements: how many agents independently arrived at this content.
+	Corroboration int32 `protobuf:"varint,13,opt,name=corroboration,proto3" json:"corroboration,omitempty"`
+	// motivating_report_ids are EvidenceService report IDs the proposing agent
+	// cited as the reason for this change, carried in commit trailers.
+	MotivatingReportIds []string `protobuf:"bytes,14,rep,name=motivating_report_ids,json=motivatingReportIds,proto3" json:"motivating_report_ids,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *Proposal) Reset() {
 	*x = Proposal{}
-	mi := &file_skills_v1_proposals_proto_msgTypes[2]
+	mi := &file_skills_v1_proposals_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -186,7 +277,7 @@ func (x *Proposal) String() string {
 func (*Proposal) ProtoMessage() {}
 
 func (x *Proposal) ProtoReflect() protoreflect.Message {
-	mi := &file_skills_v1_proposals_proto_msgTypes[2]
+	mi := &file_skills_v1_proposals_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -199,7 +290,7 @@ func (x *Proposal) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Proposal.ProtoReflect.Descriptor instead.
 func (*Proposal) Descriptor() ([]byte, []int) {
-	return file_skills_v1_proposals_proto_rawDescGZIP(), []int{2}
+	return file_skills_v1_proposals_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *Proposal) GetProposalId() string {
@@ -272,6 +363,34 @@ func (x *Proposal) GetUpdatedAt() *timestamppb.Timestamp {
 	return nil
 }
 
+func (x *Proposal) GetContentHash() string {
+	if x != nil {
+		return x.ContentHash
+	}
+	return ""
+}
+
+func (x *Proposal) GetEndorsements() []*Endorsement {
+	if x != nil {
+		return x.Endorsements
+	}
+	return nil
+}
+
+func (x *Proposal) GetCorroboration() int32 {
+	if x != nil {
+		return x.Corroboration
+	}
+	return 0
+}
+
+func (x *Proposal) GetMotivatingReportIds() []string {
+	if x != nil {
+		return x.MotivatingReportIds
+	}
+	return nil
+}
+
 type ProposeChangeRequest struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	SkillName       string                 `protobuf:"bytes,1,opt,name=skill_name,json=skillName,proto3" json:"skill_name,omitempty"`
@@ -280,13 +399,23 @@ type ProposeChangeRequest struct {
 	Files           []*FileChange          `protobuf:"bytes,4,rep,name=files,proto3" json:"files,omitempty"`
 	CommitMessage   string                 `protobuf:"bytes,5,opt,name=commit_message,json=commitMessage,proto3" json:"commit_message,omitempty"`
 	SourceThreadUri string                 `protobuf:"bytes,6,opt,name=source_thread_uri,json=sourceThreadUri,proto3" json:"source_thread_uri,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// motivating_report_ids are EvidenceService report IDs that motivated this
+	// change. Supplying them is what makes a proposal arrive carrying its own
+	// evidence, so a reviewer can see the failures it claims to fix rather
+	// than taking the change on faith. Optional, and not validated against the
+	// evidence store - the registry runs fine with EvidenceService disabled.
+	MotivatingReportIds []string `protobuf:"bytes,7,rep,name=motivating_report_ids,json=motivatingReportIds,proto3" json:"motivating_report_ids,omitempty"`
+	// allow_duplicate skips the content-hash dedup check and forces a branch
+	// of the caller's own even if an identical proposal already exists. Rarely
+	// wanted; endorsing the existing proposal is almost always better.
+	AllowDuplicate bool `protobuf:"varint,8,opt,name=allow_duplicate,json=allowDuplicate,proto3" json:"allow_duplicate,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *ProposeChangeRequest) Reset() {
 	*x = ProposeChangeRequest{}
-	mi := &file_skills_v1_proposals_proto_msgTypes[3]
+	mi := &file_skills_v1_proposals_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -298,7 +427,7 @@ func (x *ProposeChangeRequest) String() string {
 func (*ProposeChangeRequest) ProtoMessage() {}
 
 func (x *ProposeChangeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_skills_v1_proposals_proto_msgTypes[3]
+	mi := &file_skills_v1_proposals_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -311,7 +440,7 @@ func (x *ProposeChangeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProposeChangeRequest.ProtoReflect.Descriptor instead.
 func (*ProposeChangeRequest) Descriptor() ([]byte, []int) {
-	return file_skills_v1_proposals_proto_rawDescGZIP(), []int{3}
+	return file_skills_v1_proposals_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *ProposeChangeRequest) GetSkillName() string {
@@ -356,6 +485,88 @@ func (x *ProposeChangeRequest) GetSourceThreadUri() string {
 	return ""
 }
 
+func (x *ProposeChangeRequest) GetMotivatingReportIds() []string {
+	if x != nil {
+		return x.MotivatingReportIds
+	}
+	return nil
+}
+
+func (x *ProposeChangeRequest) GetAllowDuplicate() bool {
+	if x != nil {
+		return x.AllowDuplicate
+	}
+	return false
+}
+
+type ProposeChangeResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// proposal is the caller's own proposal, or - when deduplicated is true -
+	// the pre-existing proposal the caller was recorded as endorsing.
+	Proposal *Proposal `protobuf:"bytes,1,opt,name=proposal,proto3" json:"proposal,omitempty"`
+	// deduplicated is true if an open proposal already produced identical
+	// content, so no new branch was created. The caller's contribution was
+	// recorded as an Endorsement on the returned proposal instead.
+	Deduplicated bool `protobuf:"varint,2,opt,name=deduplicated,proto3" json:"deduplicated,omitempty"`
+	// auto_submitted is set if this call pushed the returned proposal's
+	// corroboration to the configured threshold and a pull request was opened
+	// automatically as a result.
+	AutoSubmitted *SubmitProposalResponse `protobuf:"bytes,3,opt,name=auto_submitted,json=autoSubmitted,proto3" json:"auto_submitted,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ProposeChangeResponse) Reset() {
+	*x = ProposeChangeResponse{}
+	mi := &file_skills_v1_proposals_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProposeChangeResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProposeChangeResponse) ProtoMessage() {}
+
+func (x *ProposeChangeResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_skills_v1_proposals_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProposeChangeResponse.ProtoReflect.Descriptor instead.
+func (*ProposeChangeResponse) Descriptor() ([]byte, []int) {
+	return file_skills_v1_proposals_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *ProposeChangeResponse) GetProposal() *Proposal {
+	if x != nil {
+		return x.Proposal
+	}
+	return nil
+}
+
+func (x *ProposeChangeResponse) GetDeduplicated() bool {
+	if x != nil {
+		return x.Deduplicated
+	}
+	return false
+}
+
+func (x *ProposeChangeResponse) GetAutoSubmitted() *SubmitProposalResponse {
+	if x != nil {
+		return x.AutoSubmitted
+	}
+	return nil
+}
+
 type ListProposalsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	SkillName     string                 `protobuf:"bytes,1,opt,name=skill_name,json=skillName,proto3" json:"skill_name,omitempty"` // Optional filter
@@ -366,7 +577,7 @@ type ListProposalsRequest struct {
 
 func (x *ListProposalsRequest) Reset() {
 	*x = ListProposalsRequest{}
-	mi := &file_skills_v1_proposals_proto_msgTypes[4]
+	mi := &file_skills_v1_proposals_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -378,7 +589,7 @@ func (x *ListProposalsRequest) String() string {
 func (*ListProposalsRequest) ProtoMessage() {}
 
 func (x *ListProposalsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_skills_v1_proposals_proto_msgTypes[4]
+	mi := &file_skills_v1_proposals_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -391,7 +602,7 @@ func (x *ListProposalsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListProposalsRequest.ProtoReflect.Descriptor instead.
 func (*ListProposalsRequest) Descriptor() ([]byte, []int) {
-	return file_skills_v1_proposals_proto_rawDescGZIP(), []int{4}
+	return file_skills_v1_proposals_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *ListProposalsRequest) GetSkillName() string {
@@ -417,7 +628,7 @@ type ListProposalsResponse struct {
 
 func (x *ListProposalsResponse) Reset() {
 	*x = ListProposalsResponse{}
-	mi := &file_skills_v1_proposals_proto_msgTypes[5]
+	mi := &file_skills_v1_proposals_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -429,7 +640,7 @@ func (x *ListProposalsResponse) String() string {
 func (*ListProposalsResponse) ProtoMessage() {}
 
 func (x *ListProposalsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_skills_v1_proposals_proto_msgTypes[5]
+	mi := &file_skills_v1_proposals_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -442,7 +653,7 @@ func (x *ListProposalsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListProposalsResponse.ProtoReflect.Descriptor instead.
 func (*ListProposalsResponse) Descriptor() ([]byte, []int) {
-	return file_skills_v1_proposals_proto_rawDescGZIP(), []int{5}
+	return file_skills_v1_proposals_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ListProposalsResponse) GetProposals() []*Proposal {
@@ -461,7 +672,7 @@ type GetProposalRequest struct {
 
 func (x *GetProposalRequest) Reset() {
 	*x = GetProposalRequest{}
-	mi := &file_skills_v1_proposals_proto_msgTypes[6]
+	mi := &file_skills_v1_proposals_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -473,7 +684,7 @@ func (x *GetProposalRequest) String() string {
 func (*GetProposalRequest) ProtoMessage() {}
 
 func (x *GetProposalRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_skills_v1_proposals_proto_msgTypes[6]
+	mi := &file_skills_v1_proposals_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -486,7 +697,7 @@ func (x *GetProposalRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetProposalRequest.ProtoReflect.Descriptor instead.
 func (*GetProposalRequest) Descriptor() ([]byte, []int) {
-	return file_skills_v1_proposals_proto_rawDescGZIP(), []int{6}
+	return file_skills_v1_proposals_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *GetProposalRequest) GetBranch() string {
@@ -507,7 +718,7 @@ type GetSkillAtRefRequest struct {
 
 func (x *GetSkillAtRefRequest) Reset() {
 	*x = GetSkillAtRefRequest{}
-	mi := &file_skills_v1_proposals_proto_msgTypes[7]
+	mi := &file_skills_v1_proposals_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -519,7 +730,7 @@ func (x *GetSkillAtRefRequest) String() string {
 func (*GetSkillAtRefRequest) ProtoMessage() {}
 
 func (x *GetSkillAtRefRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_skills_v1_proposals_proto_msgTypes[7]
+	mi := &file_skills_v1_proposals_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -532,7 +743,7 @@ func (x *GetSkillAtRefRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSkillAtRefRequest.ProtoReflect.Descriptor instead.
 func (*GetSkillAtRefRequest) Descriptor() ([]byte, []int) {
-	return file_skills_v1_proposals_proto_rawDescGZIP(), []int{7}
+	return file_skills_v1_proposals_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *GetSkillAtRefRequest) GetSkillName() string {
@@ -567,7 +778,7 @@ type SubmitProposalRequest struct {
 
 func (x *SubmitProposalRequest) Reset() {
 	*x = SubmitProposalRequest{}
-	mi := &file_skills_v1_proposals_proto_msgTypes[8]
+	mi := &file_skills_v1_proposals_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -579,7 +790,7 @@ func (x *SubmitProposalRequest) String() string {
 func (*SubmitProposalRequest) ProtoMessage() {}
 
 func (x *SubmitProposalRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_skills_v1_proposals_proto_msgTypes[8]
+	mi := &file_skills_v1_proposals_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -592,7 +803,7 @@ func (x *SubmitProposalRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitProposalRequest.ProtoReflect.Descriptor instead.
 func (*SubmitProposalRequest) Descriptor() ([]byte, []int) {
-	return file_skills_v1_proposals_proto_rawDescGZIP(), []int{8}
+	return file_skills_v1_proposals_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *SubmitProposalRequest) GetBranch() string {
@@ -626,7 +837,7 @@ type SubmitProposalResponse struct {
 
 func (x *SubmitProposalResponse) Reset() {
 	*x = SubmitProposalResponse{}
-	mi := &file_skills_v1_proposals_proto_msgTypes[9]
+	mi := &file_skills_v1_proposals_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -638,7 +849,7 @@ func (x *SubmitProposalResponse) String() string {
 func (*SubmitProposalResponse) ProtoMessage() {}
 
 func (x *SubmitProposalResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_skills_v1_proposals_proto_msgTypes[9]
+	mi := &file_skills_v1_proposals_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -651,7 +862,7 @@ func (x *SubmitProposalResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitProposalResponse.ProtoReflect.Descriptor instead.
 func (*SubmitProposalResponse) Descriptor() ([]byte, []int) {
-	return file_skills_v1_proposals_proto_rawDescGZIP(), []int{9}
+	return file_skills_v1_proposals_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *SubmitProposalResponse) GetPullRequestUrl() string {
@@ -666,6 +877,181 @@ func (x *SubmitProposalResponse) GetPullRequestNumber() int64 {
 		return x.PullRequestNumber
 	}
 	return 0
+}
+
+// ProposalCluster is a set of open proposals for one skill whose diffs touch
+// overlapping line ranges of the same files. Overlap is the signal: two
+// agents rewriting the same passage are almost certainly responding to the
+// same defect, even when their fixes differ and their content hashes don't
+// match. Non-overlapping proposals are left alone - they're orthogonal edits
+// that happen to share a skill.
+//
+// Clusters are recomputed from branch state on every call. Nothing about
+// them is stored, and no judgment is applied: the server measures whether
+// independent agents converged on the same region, never whether any of
+// their proposals is good.
+type ProposalCluster struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Proposals []*Proposal            `protobuf:"bytes,1,rep,name=proposals,proto3" json:"proposals,omitempty"`
+	// contested_paths are the files more than one proposal in this cluster
+	// modifies, sorted.
+	ContestedPaths []string `protobuf:"bytes,2,rep,name=contested_paths,json=contestedPaths,proto3" json:"contested_paths,omitempty"`
+	// distinct_agents counts unique agent IDs across every proposal in the
+	// cluster and their non-stale endorsements.
+	DistinctAgents int32 `protobuf:"varint,3,opt,name=distinct_agents,json=distinctAgents,proto3" json:"distinct_agents,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *ProposalCluster) Reset() {
+	*x = ProposalCluster{}
+	mi := &file_skills_v1_proposals_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProposalCluster) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProposalCluster) ProtoMessage() {}
+
+func (x *ProposalCluster) ProtoReflect() protoreflect.Message {
+	mi := &file_skills_v1_proposals_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProposalCluster.ProtoReflect.Descriptor instead.
+func (*ProposalCluster) Descriptor() ([]byte, []int) {
+	return file_skills_v1_proposals_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *ProposalCluster) GetProposals() []*Proposal {
+	if x != nil {
+		return x.Proposals
+	}
+	return nil
+}
+
+func (x *ProposalCluster) GetContestedPaths() []string {
+	if x != nil {
+		return x.ContestedPaths
+	}
+	return nil
+}
+
+func (x *ProposalCluster) GetDistinctAgents() int32 {
+	if x != nil {
+		return x.DistinctAgents
+	}
+	return 0
+}
+
+type ListProposalClustersRequest struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	SkillName string                 `protobuf:"bytes,1,opt,name=skill_name,json=skillName,proto3" json:"skill_name,omitempty"` // Optional filter
+	// include_singletons returns clusters of one proposal too. Off by default:
+	// the point of clustering is to surface contention.
+	IncludeSingletons bool `protobuf:"varint,2,opt,name=include_singletons,json=includeSingletons,proto3" json:"include_singletons,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *ListProposalClustersRequest) Reset() {
+	*x = ListProposalClustersRequest{}
+	mi := &file_skills_v1_proposals_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListProposalClustersRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListProposalClustersRequest) ProtoMessage() {}
+
+func (x *ListProposalClustersRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_skills_v1_proposals_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListProposalClustersRequest.ProtoReflect.Descriptor instead.
+func (*ListProposalClustersRequest) Descriptor() ([]byte, []int) {
+	return file_skills_v1_proposals_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *ListProposalClustersRequest) GetSkillName() string {
+	if x != nil {
+		return x.SkillName
+	}
+	return ""
+}
+
+func (x *ListProposalClustersRequest) GetIncludeSingletons() bool {
+	if x != nil {
+		return x.IncludeSingletons
+	}
+	return false
+}
+
+type ListProposalClustersResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// clusters are sorted by distinct_agents, descending - the review queue,
+	// most-corroborated first.
+	Clusters      []*ProposalCluster `protobuf:"bytes,1,rep,name=clusters,proto3" json:"clusters,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListProposalClustersResponse) Reset() {
+	*x = ListProposalClustersResponse{}
+	mi := &file_skills_v1_proposals_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListProposalClustersResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListProposalClustersResponse) ProtoMessage() {}
+
+func (x *ListProposalClustersResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_skills_v1_proposals_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListProposalClustersResponse.ProtoReflect.Descriptor instead.
+func (*ListProposalClustersResponse) Descriptor() ([]byte, []int) {
+	return file_skills_v1_proposals_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *ListProposalClustersResponse) GetClusters() []*ProposalCluster {
+	if x != nil {
+		return x.Clusters
+	}
+	return nil
 }
 
 var File_skills_v1_proposals_proto protoreflect.FileDescriptor
@@ -684,7 +1070,13 @@ const file_skills_v1_proposals_proto_rawDesc = "" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x16\n" +
 	"\x06author\x18\x03 \x01(\tR\x06author\x12;\n" +
 	"\vauthored_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
-	"authoredAt\"\xdf\x02\n" +
+	"authoredAt\"\x9e\x01\n" +
+	"\vEndorsement\x12\x19\n" +
+	"\bagent_id\x18\x01 \x01(\tR\aagentId\x12!\n" +
+	"\fendorsed_sha\x18\x02 \x01(\tR\vendorsedSha\x12\x14\n" +
+	"\x05stale\x18\x03 \x01(\bR\x05stale\x12;\n" +
+	"\vendorsed_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"endorsedAt\"\x98\x04\n" +
 	"\bProposal\x12\x1f\n" +
 	"\vproposal_id\x18\x01 \x01(\tR\n" +
 	"proposalId\x12\x16\n" +
@@ -699,7 +1091,11 @@ const file_skills_v1_proposals_proto_rawDesc = "" +
 	"\x11source_thread_uri\x18\t \x01(\tR\x0fsourceThreadUri\x129\n" +
 	"\n" +
 	"updated_at\x18\n" +
-	" \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\"\xf1\x01\n" +
+	" \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\x12!\n" +
+	"\fcontent_hash\x18\v \x01(\tR\vcontentHash\x12:\n" +
+	"\fendorsements\x18\f \x03(\v2\x16.skills.v1.EndorsementR\fendorsements\x12$\n" +
+	"\rcorroboration\x18\r \x01(\x05R\rcorroboration\x122\n" +
+	"\x15motivating_report_ids\x18\x0e \x03(\tR\x13motivatingReportIds\"\xce\x02\n" +
 	"\x14ProposeChangeRequest\x12\x1d\n" +
 	"\n" +
 	"skill_name\x18\x01 \x01(\tR\tskillName\x12\x19\n" +
@@ -708,7 +1104,13 @@ const file_skills_v1_proposals_proto_rawDesc = "" +
 	"proposalId\x12+\n" +
 	"\x05files\x18\x04 \x03(\v2\x15.skills.v1.FileChangeR\x05files\x12%\n" +
 	"\x0ecommit_message\x18\x05 \x01(\tR\rcommitMessage\x12*\n" +
-	"\x11source_thread_uri\x18\x06 \x01(\tR\x0fsourceThreadUri\"P\n" +
+	"\x11source_thread_uri\x18\x06 \x01(\tR\x0fsourceThreadUri\x122\n" +
+	"\x15motivating_report_ids\x18\a \x03(\tR\x13motivatingReportIds\x12'\n" +
+	"\x0fallow_duplicate\x18\b \x01(\bR\x0eallowDuplicate\"\xb6\x01\n" +
+	"\x15ProposeChangeResponse\x12/\n" +
+	"\bproposal\x18\x01 \x01(\v2\x13.skills.v1.ProposalR\bproposal\x12\"\n" +
+	"\fdeduplicated\x18\x02 \x01(\bR\fdeduplicated\x12H\n" +
+	"\x0eauto_submitted\x18\x03 \x01(\v2!.skills.v1.SubmitProposalResponseR\rautoSubmitted\"P\n" +
 	"\x14ListProposalsRequest\x12\x1d\n" +
 	"\n" +
 	"skill_name\x18\x01 \x01(\tR\tskillName\x12\x19\n" +
@@ -728,9 +1130,20 @@ const file_skills_v1_proposals_proto_rawDesc = "" +
 	"\apr_body\x18\x03 \x01(\tR\x06prBody\"r\n" +
 	"\x16SubmitProposalResponse\x12(\n" +
 	"\x10pull_request_url\x18\x01 \x01(\tR\x0epullRequestUrl\x12.\n" +
-	"\x13pull_request_number\x18\x02 \x01(\x03R\x11pullRequestNumber2\x95\x03\n" +
-	"\x0fProposalService\x12E\n" +
-	"\rProposeChange\x12\x1f.skills.v1.ProposeChangeRequest\x1a\x13.skills.v1.Proposal\x12R\n" +
+	"\x13pull_request_number\x18\x02 \x01(\x03R\x11pullRequestNumber\"\x96\x01\n" +
+	"\x0fProposalCluster\x121\n" +
+	"\tproposals\x18\x01 \x03(\v2\x13.skills.v1.ProposalR\tproposals\x12'\n" +
+	"\x0fcontested_paths\x18\x02 \x03(\tR\x0econtestedPaths\x12'\n" +
+	"\x0fdistinct_agents\x18\x03 \x01(\x05R\x0edistinctAgents\"k\n" +
+	"\x1bListProposalClustersRequest\x12\x1d\n" +
+	"\n" +
+	"skill_name\x18\x01 \x01(\tR\tskillName\x12-\n" +
+	"\x12include_singletons\x18\x02 \x01(\bR\x11includeSingletons\"V\n" +
+	"\x1cListProposalClustersResponse\x126\n" +
+	"\bclusters\x18\x01 \x03(\v2\x1a.skills.v1.ProposalClusterR\bclusters2\x8b\x04\n" +
+	"\x0fProposalService\x12R\n" +
+	"\rProposeChange\x12\x1f.skills.v1.ProposeChangeRequest\x1a .skills.v1.ProposeChangeResponse\x12g\n" +
+	"\x14ListProposalClusters\x12&.skills.v1.ListProposalClustersRequest\x1a'.skills.v1.ListProposalClustersResponse\x12R\n" +
 	"\rListProposals\x12\x1f.skills.v1.ListProposalsRequest\x1a .skills.v1.ListProposalsResponse\x12A\n" +
 	"\vGetProposal\x12\x1d.skills.v1.GetProposalRequest\x1a\x13.skills.v1.Proposal\x12M\n" +
 	"\rGetSkillAtRef\x12\x1f.skills.v1.GetSkillAtRefRequest\x1a\x1b.skills.v1.GetSkillResponse\x12U\n" +
@@ -748,42 +1161,55 @@ func file_skills_v1_proposals_proto_rawDescGZIP() []byte {
 	return file_skills_v1_proposals_proto_rawDescData
 }
 
-var file_skills_v1_proposals_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_skills_v1_proposals_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_skills_v1_proposals_proto_goTypes = []any{
-	(*FileChange)(nil),             // 0: skills.v1.FileChange
-	(*CommitInfo)(nil),             // 1: skills.v1.CommitInfo
-	(*Proposal)(nil),               // 2: skills.v1.Proposal
-	(*ProposeChangeRequest)(nil),   // 3: skills.v1.ProposeChangeRequest
-	(*ListProposalsRequest)(nil),   // 4: skills.v1.ListProposalsRequest
-	(*ListProposalsResponse)(nil),  // 5: skills.v1.ListProposalsResponse
-	(*GetProposalRequest)(nil),     // 6: skills.v1.GetProposalRequest
-	(*GetSkillAtRefRequest)(nil),   // 7: skills.v1.GetSkillAtRefRequest
-	(*SubmitProposalRequest)(nil),  // 8: skills.v1.SubmitProposalRequest
-	(*SubmitProposalResponse)(nil), // 9: skills.v1.SubmitProposalResponse
-	(*timestamppb.Timestamp)(nil),  // 10: google.protobuf.Timestamp
-	(*GetSkillResponse)(nil),       // 11: skills.v1.GetSkillResponse
+	(*FileChange)(nil),                   // 0: skills.v1.FileChange
+	(*CommitInfo)(nil),                   // 1: skills.v1.CommitInfo
+	(*Endorsement)(nil),                  // 2: skills.v1.Endorsement
+	(*Proposal)(nil),                     // 3: skills.v1.Proposal
+	(*ProposeChangeRequest)(nil),         // 4: skills.v1.ProposeChangeRequest
+	(*ProposeChangeResponse)(nil),        // 5: skills.v1.ProposeChangeResponse
+	(*ListProposalsRequest)(nil),         // 6: skills.v1.ListProposalsRequest
+	(*ListProposalsResponse)(nil),        // 7: skills.v1.ListProposalsResponse
+	(*GetProposalRequest)(nil),           // 8: skills.v1.GetProposalRequest
+	(*GetSkillAtRefRequest)(nil),         // 9: skills.v1.GetSkillAtRefRequest
+	(*SubmitProposalRequest)(nil),        // 10: skills.v1.SubmitProposalRequest
+	(*SubmitProposalResponse)(nil),       // 11: skills.v1.SubmitProposalResponse
+	(*ProposalCluster)(nil),              // 12: skills.v1.ProposalCluster
+	(*ListProposalClustersRequest)(nil),  // 13: skills.v1.ListProposalClustersRequest
+	(*ListProposalClustersResponse)(nil), // 14: skills.v1.ListProposalClustersResponse
+	(*timestamppb.Timestamp)(nil),        // 15: google.protobuf.Timestamp
+	(*GetSkillResponse)(nil),             // 16: skills.v1.GetSkillResponse
 }
 var file_skills_v1_proposals_proto_depIdxs = []int32{
-	10, // 0: skills.v1.CommitInfo.authored_at:type_name -> google.protobuf.Timestamp
-	1,  // 1: skills.v1.Proposal.commits:type_name -> skills.v1.CommitInfo
-	10, // 2: skills.v1.Proposal.updated_at:type_name -> google.protobuf.Timestamp
-	0,  // 3: skills.v1.ProposeChangeRequest.files:type_name -> skills.v1.FileChange
-	2,  // 4: skills.v1.ListProposalsResponse.proposals:type_name -> skills.v1.Proposal
-	3,  // 5: skills.v1.ProposalService.ProposeChange:input_type -> skills.v1.ProposeChangeRequest
-	4,  // 6: skills.v1.ProposalService.ListProposals:input_type -> skills.v1.ListProposalsRequest
-	6,  // 7: skills.v1.ProposalService.GetProposal:input_type -> skills.v1.GetProposalRequest
-	7,  // 8: skills.v1.ProposalService.GetSkillAtRef:input_type -> skills.v1.GetSkillAtRefRequest
-	8,  // 9: skills.v1.ProposalService.SubmitProposal:input_type -> skills.v1.SubmitProposalRequest
-	2,  // 10: skills.v1.ProposalService.ProposeChange:output_type -> skills.v1.Proposal
-	5,  // 11: skills.v1.ProposalService.ListProposals:output_type -> skills.v1.ListProposalsResponse
-	2,  // 12: skills.v1.ProposalService.GetProposal:output_type -> skills.v1.Proposal
-	11, // 13: skills.v1.ProposalService.GetSkillAtRef:output_type -> skills.v1.GetSkillResponse
-	9,  // 14: skills.v1.ProposalService.SubmitProposal:output_type -> skills.v1.SubmitProposalResponse
-	10, // [10:15] is the sub-list for method output_type
-	5,  // [5:10] is the sub-list for method input_type
-	5,  // [5:5] is the sub-list for extension type_name
-	5,  // [5:5] is the sub-list for extension extendee
-	0,  // [0:5] is the sub-list for field type_name
+	15, // 0: skills.v1.CommitInfo.authored_at:type_name -> google.protobuf.Timestamp
+	15, // 1: skills.v1.Endorsement.endorsed_at:type_name -> google.protobuf.Timestamp
+	1,  // 2: skills.v1.Proposal.commits:type_name -> skills.v1.CommitInfo
+	15, // 3: skills.v1.Proposal.updated_at:type_name -> google.protobuf.Timestamp
+	2,  // 4: skills.v1.Proposal.endorsements:type_name -> skills.v1.Endorsement
+	0,  // 5: skills.v1.ProposeChangeRequest.files:type_name -> skills.v1.FileChange
+	3,  // 6: skills.v1.ProposeChangeResponse.proposal:type_name -> skills.v1.Proposal
+	11, // 7: skills.v1.ProposeChangeResponse.auto_submitted:type_name -> skills.v1.SubmitProposalResponse
+	3,  // 8: skills.v1.ListProposalsResponse.proposals:type_name -> skills.v1.Proposal
+	3,  // 9: skills.v1.ProposalCluster.proposals:type_name -> skills.v1.Proposal
+	12, // 10: skills.v1.ListProposalClustersResponse.clusters:type_name -> skills.v1.ProposalCluster
+	4,  // 11: skills.v1.ProposalService.ProposeChange:input_type -> skills.v1.ProposeChangeRequest
+	13, // 12: skills.v1.ProposalService.ListProposalClusters:input_type -> skills.v1.ListProposalClustersRequest
+	6,  // 13: skills.v1.ProposalService.ListProposals:input_type -> skills.v1.ListProposalsRequest
+	8,  // 14: skills.v1.ProposalService.GetProposal:input_type -> skills.v1.GetProposalRequest
+	9,  // 15: skills.v1.ProposalService.GetSkillAtRef:input_type -> skills.v1.GetSkillAtRefRequest
+	10, // 16: skills.v1.ProposalService.SubmitProposal:input_type -> skills.v1.SubmitProposalRequest
+	5,  // 17: skills.v1.ProposalService.ProposeChange:output_type -> skills.v1.ProposeChangeResponse
+	14, // 18: skills.v1.ProposalService.ListProposalClusters:output_type -> skills.v1.ListProposalClustersResponse
+	7,  // 19: skills.v1.ProposalService.ListProposals:output_type -> skills.v1.ListProposalsResponse
+	3,  // 20: skills.v1.ProposalService.GetProposal:output_type -> skills.v1.Proposal
+	16, // 21: skills.v1.ProposalService.GetSkillAtRef:output_type -> skills.v1.GetSkillResponse
+	11, // 22: skills.v1.ProposalService.SubmitProposal:output_type -> skills.v1.SubmitProposalResponse
+	17, // [17:23] is the sub-list for method output_type
+	11, // [11:17] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_skills_v1_proposals_proto_init() }
@@ -798,7 +1224,7 @@ func file_skills_v1_proposals_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_skills_v1_proposals_proto_rawDesc), len(file_skills_v1_proposals_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   10,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

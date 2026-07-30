@@ -30,13 +30,20 @@ type index struct {
 type Registry struct {
 	backend storage.Backend
 	prefix  string
+	commit  string
 	current atomic.Pointer[index]
 }
 
 // New creates a Registry backed by the given storage.Backend, rooted at
-// prefix. Call Load before serving traffic to perform the initial load.
-func New(backend storage.Backend, prefix string) *Registry {
-	r := &Registry{backend: backend, prefix: prefix}
+// prefix. commit is the revision the backend's content was read at; it is
+// stamped onto every skill's metadata so outcome reports can be attributed
+// to a specific version of the content. Pass an empty string if the
+// revision genuinely isn't known - the metadata field is then empty, and
+// callers downstream treat the reports as unversioned.
+//
+// Call Load before serving traffic to perform the initial load.
+func New(backend storage.Backend, prefix, commit string) *Registry {
+	r := &Registry{backend: backend, prefix: prefix, commit: commit}
 	r.current.Store(&index{byName: map[string]*Skill{}})
 	return r
 }
@@ -93,11 +100,12 @@ func (r *Registry) Load(ctx context.Context) (int, error) {
 		if err != nil {
 			return 0, fmt.Errorf("registry: loading skill %q: %w", name, err)
 		}
+		md.Commit = r.commit
 		slog.Debug("registry: loaded skill", "name", name, "files", len(files))
 		byName[name] = &Skill{Metadata: md}
 	}
 
-	slog.Info("registry: index built", "prefix", r.prefix, "skills", len(byName))
+	slog.Info("registry: index built", "prefix", r.prefix, "skills", len(byName), "commit", r.commit)
 	r.current.Store(&index{byName: byName, indexedAt: time.Now()})
 	return len(byName), nil
 }

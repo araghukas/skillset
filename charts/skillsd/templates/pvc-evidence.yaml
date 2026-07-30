@@ -1,0 +1,25 @@
+{{- if and .Values.registry.enabled .Values.registry.evidence.enabled .Values.registry.evidence.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "skillsd.registryFullname" . }}-evidence
+  labels:
+    {{- include "skillsd.labels" . | nindent 4 }}
+    app.kubernetes.io/component: evidence
+spec:
+  # Kept separate from the registry's repo-data volume on purpose. That one
+  # holds a git working copy - a cache of a remote, rebuildable by
+  # re-cloning. This one holds outcome reports, which are primary
+  # observations that exist nowhere else and cannot be reconstructed from
+  # anything upstream. They want different sizing, and more importantly a
+  # different backup policy: losing repo-data costs a clone, losing this
+  # costs the entire history of how the skills have actually behaved.
+  accessModes:
+    - ReadWriteOnce
+  {{- with .Values.registry.evidence.persistence.storageClassName }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.registry.evidence.persistence.size }}
+{{- end }}

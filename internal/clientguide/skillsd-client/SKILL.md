@@ -1,6 +1,6 @@
 ---
 name: skillsd-client
-description: Explains how to call skillsd's gRPC API (SkillService, ProposalService) to discover skills, fetch a skill's full content, and propose edits to a skill as a reviewable git branch / pull request. Use this skill whenever an agent has been given access to a skillsd/skillsd-registry endpoint and needs to know which RPCs to call, what fields to send, and how the discovery and proposal workflows fit together — for example when asked to "find a skill for X", "load skill Y", "update/fix skill Y", or "submit a proposal/PR for skill Y".
+description: Explains how to call skillsd's gRPC API (SkillService, ProposalService, EvidenceService) to discover skills, fetch a skill's full content, report how a skill actually performed after using it, and propose edits to a skill as a reviewable git branch / pull request. Use this skill whenever an agent has been given access to a skillsd/skillsd-registry endpoint and needs to know which RPCs to call, what fields to send, and how the discovery, reporting, and proposal workflows fit together — for example when asked to "find a skill for X", "load skill Y", "update/fix skill Y", "report that skill Y was wrong", or "submit a proposal/PR for skill Y".
 ---
 
 # Using skillsd
@@ -29,6 +29,7 @@ already have a working connection to `skillsd` and don't need to call
 |---|---|---|
 | `skills.v1.SkillService` | e.g. `:8080` | Discover skills, fetch their content, and fetch this guide (`GetClientGuide`). Always available. |
 | `skills.v1.ProposalService` | e.g. `:8081`, often a separate deployment (`skillsd-registry`) | Propose edits to a skill's files as a branch, inspect the diff, and submit it as a pull request. May not be deployed at all — treat `Unimplemented`/connection failures as "read-only environment, no proposal path available." |
+| `skills.v1.EvidenceService` | same endpoint as `ProposalService` | Report how skills performed in your session, and read the aggregated signal back to decide what's worth fixing. May be disabled; treat `Unimplemented` as "no reporting path here." |
 
 Both are plain gRPC with server reflection enabled, so `grpcurl` (or any
 gRPC client) can discover methods and message shapes at runtime without a
@@ -89,6 +90,11 @@ Binary/non-UTF-8 files (images, etc.) are silently omitted from
 `context_files` since the field is a proto3 string — expect a skill's
 `assets/` directory to be incomplete if it holds binaries.
 
+**Keep `SkillMetadata.commit`.** Every skill you fetch carries the git commit
+its content came from. You need it later, in `ReportOutcome` — a report that
+names a skill but not a version can't tell anyone whether a recent edit broke
+something or it was always broken. Hold onto it for every skill you load.
+
 **`GetClientGuide({})`** — fetches this document, always as of the running
 server's build (no arguments; there's only ever one). Same response shape as
 `GetSkill` (`GetSkillResponse{skill}`) so a client that already knows how to
@@ -97,6 +103,79 @@ render a `SkillMetadata`/`context_files` pair can render this one too.
 ```bash
 grpcurl -plaintext -d '{}' <host:port> skills.v1.SkillService/GetClientGuide
 ```
+
+## Reporting how a skill performed (`EvidenceService`)
+
+At the end of a session, report what happened to every skill you used. This
+costs you one call and is the only way anyone learns that a skill is wrong:
+nobody is watching your session, and a skill that quietly misleads agents
+will keep doing so until someone says so.
+
+**`ReportOutcome(report_id, agent_id, session_id, skills)`** — one call per
+session, listing every skill the session used.
+
+- `report_id` is a UUID **you** generate, once, before the first attempt. It
+  makes the call idempotent: if it fails or times out, retry with the *same*
+  ID and nothing is double-counted. Don't generate a fresh one on retry.
+- `skills` is a list of `{skill_name, skill_commit, verdict, note}`. The
+  `skill_commit` is the `SkillMetadata.commit` you kept when you loaded it.
+- **Include the skills that worked.** They are the denominator. If you only
+  report failures, every rate computed from your reports is meaningless.
+
+Pick the verdict that describes what observably happened, not how you felt
+about the skill. Each one implies a different repair:
+
+| Verdict | When | What it says is wrong |
+|---|---|---|
+| `VERDICT_APPLIED` | Followed it, nothing contradicted it | Nothing — this is the denominator |
+| `VERDICT_APPLIED_WITH_CORRECTION` | Followed it, but had to adjust or work around part of it | Content is stale or imprecise |
+| `VERDICT_CONTRADICTED` | Reality disagreed: a documented command failed, a named API didn't exist | Content is **wrong** |
+| `VERDICT_INCOMPLETE` | On-topic, but didn't cover your case; you went outside it | Content has a **gap** |
+| `VERDICT_NOT_APPLICABLE` | You loaded it, then it turned out irrelevant | The `description` over-triggers |
+
+Write a concrete `note` for anything other than `APPLIED`: the command that
+failed, the instruction that was wrong. A reviewer reads these. "Didn't work"
+helps nobody.
+
+```bash
+grpcurl -plaintext -d '{
+  "report_id": "b1f0c8e2-4a1d-4f3a-9c77-2b1e6d0a55d1",
+  "agent_id": "agent-1",
+  "session_id": "sess-2291",
+  "skills": [
+    {"skill_name": "postgres-migrations", "skill_commit": "9a3c1f2...",
+     "verdict": "VERDICT_CONTRADICTED",
+     "note": "Skill says run `migrate up` before seeding; that fails with \"relation exists\" unless --baseline is passed first."},
+    {"skill_name": "incident-comms", "skill_commit": "9a3c1f2...",
+     "verdict": "VERDICT_NOT_APPLICABLE"}
+  ]
+}' <host:port> skills.v1.EvidenceService/ReportOutcome
+```
+
+A `FailedPrecondition` here usually means the registry hasn't fetched the
+commit you named yet. Retry in a few minutes with the same `report_id`.
+
+**`ListSkillSignals(skill_name?, min_reported_sessions?)`** — the aggregate,
+one row per `(skill, commit)`: `reported_sessions`, `verdict_counts`,
+`defect_rate`, and `not_applicable_rate`. **This is the "what should I fix
+next" query.** Rows come back ordered by skill, then by when each commit was
+first observed, so a `defect_rate` that jumps between two successive commits
+of one skill is a regression you can see by eye.
+
+Note that `defect_rate` and `not_applicable_rate` are deliberately separate:
+a high `not_applicable_rate` means the skill's *body* may be perfect and its
+frontmatter `description` is pulling it into the wrong tasks. Fixing the body
+would be the wrong repair.
+
+These are rates among sessions that **reported**, never among sessions —
+reporting is voluntary and a crashed session never reports. Don't present
+them as true rates.
+
+**`ListOutcomeReports(skill_name, skill_commit?, verdict?, exclude_empty_notes?, limit?)`**
+— the individual reports behind a signal. Call this before proposing a fix:
+read what actually went wrong, then cite those `report_id`s in
+`ProposeChange.motivating_report_ids`. Set `exclude_empty_notes: true` to
+skip the `APPLIED` rows.
 
 ## Proposing edits (`ProposalService`)
 
@@ -108,24 +187,70 @@ commits; nothing touches the base branch until a human merges the PR you
 optionally open at the end.
 
 **`ProposeChange(skill_name, agent_id, proposal_id, files, commit_message,
-source_thread_uri?)`** — commits full new file contents to a skill's
-proposal branch, creating the branch from the base branch's current HEAD if
-it doesn't exist yet, or appending a commit otherwise.
+source_thread_uri?, motivating_report_ids?, allow_duplicate?)`** — commits
+full new file contents to a skill's proposal branch, creating the branch from
+the base branch's current HEAD if it doesn't exist yet, or appending a commit
+otherwise. Returns `ProposeChangeResponse{proposal, deduplicated,
+auto_submitted}`.
 
 - `files` is a list of `{file_path, content, deleted}` — always send the
   **complete new content** of each changed file, never a patch/diff; the
   server computes the diff itself. Set `deleted: true` to remove a file
   (content is ignored in that case).
-- `agent_id` and `proposal_id` are caller-chosen; together with `skill_name`
-  they determine the branch name, so reuse the same `(agent_id,
-  proposal_id)` to append more commits to the same in-progress proposal,
-  or pick a new `proposal_id` to start a separate one.
+- `agent_id`, `skill_name`, and `proposal_id` are caller-chosen and must not
+  contain `/` (they form the branch name). Reuse the same `(agent_id,
+  proposal_id)` to append more commits to the same in-progress proposal, or
+  pick a new `proposal_id` to start a separate one.
+- `motivating_report_ids` are `report_id`s from `ListOutcomeReports` that
+  justify this change. **Set these whenever you have them.** They're what
+  turns the pull request from "an agent wants this" into "here are the
+  recorded failures this fixes," and a reviewer sees them without leaving
+  GitHub.
 - `source_thread_uri` is an optional pointer back to the conversation that
   produced the change — set it if you have somewhere durable to point to;
   it gets folded into the PR body by `SubmitProposal`.
 - Committing identical content to a branch that already has it fails with
   "cannot create empty commit" — expected, not a bug; it means your change
   is already committed.
+
+### If another agent already proposed your exact fix
+
+Before creating a *new* branch, the server hashes the content your change
+would produce and compares it against every open proposal for that skill.
+If another agent's proposal already produces identical content (whitespace
+differences don't count), **you don't get a branch**. Instead:
+
+- `deduplicated: true` comes back, and `proposal` is *their* proposal, not
+  yours.
+- You are recorded on it as an **endorsement**, and its `corroboration`
+  count goes up.
+
+This is intended, and it is the point: when six agents notice the same
+defect, the reviewer should get one pull request signed by six agents, not
+six pull requests saying the same thing. Treat a deduplicated response as
+success — your finding was recorded, and it made the existing proposal more
+credible than it was a moment ago.
+
+Note there is no RPC to endorse a proposal you have merely read and agreed
+with. An endorsement only means anything as evidence if it was produced
+*without* seeing the proposal it lands on, so the only way to create one is
+to independently arrive at the same content.
+
+Two consequences worth knowing:
+
+- Once **your own** branch exists, dedup no longer applies to it — you can
+  iterate freely without being diverted onto someone else's proposal.
+- If your proposal advances to new content, earlier endorsements are kept
+  but marked `stale: true` and stop counting. Agents corroborated what they
+  actually saw; that agreement doesn't transfer to a revision they never
+  reviewed.
+
+`allow_duplicate: true` forces a branch of your own anyway. Rarely what you
+want.
+
+If enough agents independently converge on one proposal, the deployment may
+open the pull request automatically — `auto_submitted` will be set on the
+response that crossed the threshold. Most deployments leave this off.
 
 ```bash
 grpcurl -plaintext -d '{
@@ -139,7 +264,22 @@ grpcurl -plaintext -d '{
 
 **`ListProposals(skill_name?, agent_id?)`** — list proposals, optionally
 filtered by either field, to check what's already in flight before starting
-a new one.
+a new one. Each `Proposal` carries its `content_hash`, its `endorsements`,
+and its `corroboration` count (1 for the proposer, plus each non-stale
+endorser).
+
+**`ListProposalClusters(skill_name?, include_singletons?)`** — groups a
+skill's open proposals by whether they edit *overlapping regions of the same
+files*. Two agents rewriting the same passage are almost certainly answering
+the same defect even when their fixes differ, so the cluster is a stronger
+signal than either proposal alone. Clusters come back sorted by
+`distinct_agents`, descending: it's a review queue, most-contested first.
+
+Use it before proposing, to see whether the thing you're about to fix is
+already contested — and to read the competing answers rather than adding a
+third in ignorance of the first two. `contested_paths` names the files more
+than one proposal in the cluster touches. Singleton clusters are omitted
+unless you ask for them, since the point is to surface contention.
 
 **`GetProposal(branch)`** — fetch a single proposal by its full branch name
 (as returned in `Proposal.branch`), including its unified `diff` against the
@@ -170,13 +310,33 @@ grpcurl -plaintext -d '{"branch": "proposals/agent-1/internal-comms/fix-typo"}' 
 
 ## Typical flow
 
+**Using a skill:**
+
 1. `ListSkills({})` → find the skill by matching the task against each
    `description`.
 2. `GetSkill({skill_name, include_context_files: true})` → read `SKILL.md`
-   and its supporting files to actually use the skill.
-3. If the task is to *change* a skill rather than use it: `ProposeChange`
-   with the full new content of every file you're touching, then
-   `GetProposal` or `GetSkillAtRef` to verify the result, then
-   `SubmitProposal` once you're confident — or stop after `ProposeChange`
-   and report the branch name if you'd rather a human take the review step
-   from there.
+   and its supporting files to actually use the skill. **Keep the
+   `commit`.**
+3. At the end of the session, `ReportOutcome` with one entry per skill you
+   used — including the ones that worked.
+
+**Fixing a skill**, whether you were asked to or noticed a problem yourself:
+
+1. `ListSkillSignals({skill_name})` → is this a known problem, and did it
+   start at a particular commit?
+2. `ListOutcomeReports({skill_name, exclude_empty_notes: true})` → read what
+   actually went wrong across sessions, and collect the `report_id`s.
+3. `ListProposalClusters({skill_name})` → is someone already fixing this?
+   If so, read their proposal before writing your own.
+4. `ProposeChange` with the full new content of every file you're touching,
+   and `motivating_report_ids` from step 2.
+   - If the response comes back `deduplicated: true`, you're done — an
+     identical proposal existed and you've now corroborated it. Report that
+     outcome rather than trying again.
+5. `GetSkillAtRef({skill_name, ref: <branch>})` → verify the result reads
+   the way you intended.
+6. `SubmitProposal` once you're confident — or stop and report the branch
+   name if you'd rather a human take the review step from there.
+
+Step 3 matters more than it looks. Skipping it is how a reviewer ends up
+with four proposals fixing one typo four different ways.

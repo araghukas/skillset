@@ -11,6 +11,7 @@ import (
 
 	skillsv1 "github.com/araghukas/skillset/gen/skills/v1"
 	"github.com/araghukas/skillset/internal/config"
+	"github.com/araghukas/skillset/internal/gitrev"
 	"github.com/araghukas/skillset/internal/registry"
 	"github.com/araghukas/skillset/internal/server"
 	"github.com/araghukas/skillset/internal/storage"
@@ -38,7 +39,7 @@ func run() error {
 	slog.SetLogLoggerLevel(cfg.LogLevel)
 
 	backend := storage.NewFSBackend(cfg.SkillsDir)
-	reg := registry.New(backend, cfg.SkillsSubPath)
+	reg := registry.New(backend, cfg.SkillsSubPath, resolveCommit(cfg))
 
 	// The skills directory is populated by a git-clone init container
 	// before this process starts, so there's exactly one load: if it
@@ -74,4 +75,28 @@ func run() error {
 
 	slog.Info("skillsd listening", "addr", cfg.GRPCAddr)
 	return grpcServer.Serve(lis)
+}
+
+// resolveCommit determines the revision to stamp onto every served skill:
+// an explicit SKILLS_COMMIT if set, otherwise HEAD of the working copy the
+// init container cloned into SkillsDir.
+//
+// A missing commit is degraded, not fatal. Pointing skillsd at a plain
+// directory of skills is a supported way to run it, and refusing to start
+// would turn provenance from a feature into a deployment requirement. The
+// cost is that outcome reports about these skills can't be attributed to a
+// version, which is worth a warning but not an outage.
+func resolveCommit(cfg config.Config) string {
+	if cfg.SkillsCommit != "" {
+		return cfg.SkillsCommit
+	}
+
+	commit, err := gitrev.Head(cfg.SkillsDir)
+	if err != nil {
+		slog.Warn("could not determine skills revision; serving skills without a commit stamp",
+			"dir", cfg.SkillsDir, "error", err,
+			"hint", "set SKILLS_COMMIT if the skills directory is not a git working copy")
+		return ""
+	}
+	return commit
 }

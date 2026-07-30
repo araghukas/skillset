@@ -10,12 +10,15 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/format/diff"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	githttp "github.com/go-git/go-git/v5/plumbing/transport/http"
 )
@@ -288,19 +291,194 @@ func (r *Repo) Log(from, to plumbing.Hash) ([]CommitInfo, error) {
 	return commits, nil
 }
 
-// Push pushes branch to origin.
-func (r *Repo) Push(ctx context.Context, branch string) error {
+// Push pushes branch to origin, along with any extra fully-qualified refs
+// named in alsoRefs. The extra refs let annotations that live outside
+// refs/heads - endorsements, submission markers - reach the remote in the
+// same round trip as the branch they describe, so they survive the loss of
+// this component's volume.
+func (r *Repo) Push(ctx context.Context, branch string, alsoRefs ...string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	refSpec := config.RefSpec(fmt.Sprintf("refs/heads/%s:refs/heads/%s", branch, branch))
+	refSpecs := []config.RefSpec{
+		config.RefSpec(fmt.Sprintf("refs/heads/%s:refs/heads/%s", branch, branch)),
+	}
+	for _, ref := range alsoRefs {
+		refSpecs = append(refSpecs, config.RefSpec(fmt.Sprintf("+%s:%s", ref, ref)))
+	}
+
 	err := r.repo.PushContext(ctx, &git.PushOptions{
 		RemoteName: "origin",
 		Auth:       r.auth,
-		RefSpecs:   []config.RefSpec{refSpec},
+		RefSpecs:   refSpecs,
 	})
 	if err != nil && !errors.Is(err, git.NoErrAlreadyUpToDate) {
 		return fmt.Errorf("gitrepo: pushing %q: %w", branch, err)
 	}
 	return nil
+}
+
+// Annotation is a dated, addressed note attached to a commit and stored as
+// a git tag object under an arbitrary ref. Endorsements and submission
+// markers are both annotations: they need an author, a timestamp, and a
+// target commit, none of which a bare ref can carry, and using a real tag
+// object gets all three without inventing a metadata store.
+type Annotation struct {
+	Ref     string // Fully-qualified ref the annotation is stored at
+	Target  string // Commit SHA the annotation points at
+	Author  string
+	Message string
+	At      time.Time
+}
+
+// Annotate writes a tag object targeting commit and points ref at it,
+// replacing whatever ref held before. ref must be fully qualified (it lives
+// outside refs/heads and refs/tags by design, so it is never mistaken for a
+// branch or a release tag).
+func (r *Repo) Annotate(ref, author, message string, target plumbing.Hash) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	tag := &object.Tag{
+		Name:       path.Base(ref),
+		Tagger:     object.Signature{Name: author, Email: author + "@agents.local", When: time.Now()},
+		Message:    message,
+		Target:     target,
+		TargetType: plumbing.CommitObject,
+	}
+
+	enc := r.repo.Storer.NewEncodedObject()
+	if err := tag.Encode(enc); err != nil {
+		return fmt.Errorf("gitrepo: encoding annotation %q: %w", ref, err)
+	}
+	hash, err := r.repo.Storer.SetEncodedObject(enc)
+	if err != nil {
+		return fmt.Errorf("gitrepo: storing annotation %q: %w", ref, err)
+	}
+
+	if err := r.repo.Storer.SetReference(plumbing.NewHashReference(plumbing.ReferenceName(ref), hash)); err != nil {
+		return fmt.Errorf("gitrepo: setting ref %q: %w", ref, err)
+	}
+	return nil
+}
+
+// Annotations returns every annotation stored under the given fully-
+// qualified ref prefix, in ref-name order.
+func (r *Repo) Annotations(prefix string) ([]Annotation, error) {
+	iter, err := r.repo.Storer.IterReferences()
+	if err != nil {
+		return nil, fmt.Errorf("gitrepo: listing refs: %w", err)
+	}
+	defer iter.Close()
+
+	var out []Annotation
+	err = iter.ForEach(func(ref *plumbing.Reference) error {
+		name := ref.Name().String()
+		if !strings.HasPrefix(name, prefix) {
+			return nil
+		}
+		tag, err := r.repo.TagObject(ref.Hash())
+		if err != nil {
+			// A ref under this prefix that isn't a tag object isn't ours;
+			// skip it rather than failing the whole listing.
+			return nil
+		}
+		out = append(out, Annotation{
+			Ref:     name,
+			Target:  tag.Target.String(),
+			Author:  tag.Tagger.Name,
+			Message: tag.Message,
+			At:      tag.Tagger.When,
+		})
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("gitrepo: iterating refs: %w", err)
+	}
+
+	sort.Slice(out, func(i, j int) bool { return out[i].Ref < out[j].Ref })
+	return out, nil
+}
+
+// LineRange is a half-open [Start, End) interval of 1-indexed line numbers
+// on the *base* side of a diff. A pure insertion has Start == End: it
+// occupies no base lines but still marks a position two proposals can
+// collide at.
+type LineRange struct {
+	Start int
+	End   int
+}
+
+// ChangedRanges returns, per file path, the base-side line ranges that
+// differ between the from and to commits.
+//
+// This is what clustering compares. go-git has no merge-tree, so rather
+// than attempting a real three-way merge to detect conflicts, overlap of
+// these ranges stands in for it: two proposals rewriting the same lines are
+// answering the same question, whether or not git would call it a textual
+// conflict. It is the cheaper signal and arguably the more meaningful one,
+// since edits that merge cleanly can still be competing answers.
+func (r *Repo) ChangedRanges(from, to plumbing.Hash) (map[string][]LineRange, error) {
+	fromCommit, err := r.repo.CommitObject(from)
+	if err != nil {
+		return nil, fmt.Errorf("gitrepo: resolving commit %s: %w", from, err)
+	}
+	toCommit, err := r.repo.CommitObject(to)
+	if err != nil {
+		return nil, fmt.Errorf("gitrepo: resolving commit %s: %w", to, err)
+	}
+	patch, err := fromCommit.Patch(toCommit)
+	if err != nil {
+		return nil, fmt.Errorf("gitrepo: diffing %s..%s: %w", from, to, err)
+	}
+
+	out := make(map[string][]LineRange)
+	for _, fp := range patch.FilePatches() {
+		fromFile, toFile := fp.Files()
+
+		// A file added by this diff has no base side to measure, and one
+		// deleted has no surviving side; either way the whole path is
+		// contested, which an empty range at line 0 represents.
+		key := ""
+		switch {
+		case fromFile != nil:
+			key = fromFile.Path()
+		case toFile != nil:
+			key = toFile.Path()
+		default:
+			continue
+		}
+		if fromFile == nil || toFile == nil {
+			out[key] = append(out[key], LineRange{Start: 0, End: 0})
+			continue
+		}
+
+		line := 1
+		for _, chunk := range fp.Chunks() {
+			n := countLines(chunk.Content())
+			switch chunk.Type() {
+			case diff.Equal:
+				line += n
+			case diff.Delete:
+				out[key] = append(out[key], LineRange{Start: line, End: line + n})
+				line += n
+			case diff.Add:
+				// Insertions consume no base lines, so the position is
+				// recorded as a zero-width range and `line` doesn't move.
+				out[key] = append(out[key], LineRange{Start: line, End: line})
+			}
+		}
+	}
+	return out, nil
+}
+
+func countLines(s string) int {
+	if s == "" {
+		return 0
+	}
+	n := strings.Count(s, "\n")
+	if !strings.HasSuffix(s, "\n") {
+		n++
+	}
+	return n
 }

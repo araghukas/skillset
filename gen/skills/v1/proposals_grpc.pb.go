@@ -19,11 +19,12 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	ProposalService_ProposeChange_FullMethodName  = "/skills.v1.ProposalService/ProposeChange"
-	ProposalService_ListProposals_FullMethodName  = "/skills.v1.ProposalService/ListProposals"
-	ProposalService_GetProposal_FullMethodName    = "/skills.v1.ProposalService/GetProposal"
-	ProposalService_GetSkillAtRef_FullMethodName  = "/skills.v1.ProposalService/GetSkillAtRef"
-	ProposalService_SubmitProposal_FullMethodName = "/skills.v1.ProposalService/SubmitProposal"
+	ProposalService_ProposeChange_FullMethodName        = "/skills.v1.ProposalService/ProposeChange"
+	ProposalService_ListProposalClusters_FullMethodName = "/skills.v1.ProposalService/ListProposalClusters"
+	ProposalService_ListProposals_FullMethodName        = "/skills.v1.ProposalService/ListProposals"
+	ProposalService_GetProposal_FullMethodName          = "/skills.v1.ProposalService/GetProposal"
+	ProposalService_GetSkillAtRef_FullMethodName        = "/skills.v1.ProposalService/GetSkillAtRef"
+	ProposalService_SubmitProposal_FullMethodName       = "/skills.v1.ProposalService/SubmitProposal"
 )
 
 // ProposalServiceClient is the client API for ProposalService service.
@@ -39,7 +40,17 @@ type ProposalServiceClient interface {
 	// Commits one or more full-content file changes to a skill on a proposal
 	// branch, creating the branch (from the current base branch HEAD) if it
 	// doesn't already exist, or appending a commit to it otherwise.
-	ProposeChange(ctx context.Context, in *ProposeChangeRequest, opts ...grpc.CallOption) (*Proposal, error)
+	//
+	// If another agent's open proposal for the same skill already produces
+	// byte-identical content (modulo whitespace normalization), no new branch
+	// is created: the caller is recorded as an endorser of that existing
+	// proposal and it is returned instead. See ProposeChangeResponse.
+	ProposeChange(ctx context.Context, in *ProposeChangeRequest, opts ...grpc.CallOption) (*ProposeChangeResponse, error)
+	// Groups a skill's open proposals into clusters of proposals that edit
+	// overlapping regions of the same files - competing answers to what is
+	// probably the same defect. Purely derived from branch state; nothing is
+	// stored.
+	ListProposalClusters(ctx context.Context, in *ListProposalClustersRequest, opts ...grpc.CallOption) (*ListProposalClustersResponse, error)
 	// Lists proposals, optionally filtered by skill and/or proposing agent.
 	ListProposals(ctx context.Context, in *ListProposalsRequest, opts ...grpc.CallOption) (*ListProposalsResponse, error)
 	// Fetches a single proposal, including its unified diff against base.
@@ -61,10 +72,20 @@ func NewProposalServiceClient(cc grpc.ClientConnInterface) ProposalServiceClient
 	return &proposalServiceClient{cc}
 }
 
-func (c *proposalServiceClient) ProposeChange(ctx context.Context, in *ProposeChangeRequest, opts ...grpc.CallOption) (*Proposal, error) {
+func (c *proposalServiceClient) ProposeChange(ctx context.Context, in *ProposeChangeRequest, opts ...grpc.CallOption) (*ProposeChangeResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(Proposal)
+	out := new(ProposeChangeResponse)
 	err := c.cc.Invoke(ctx, ProposalService_ProposeChange_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *proposalServiceClient) ListProposalClusters(ctx context.Context, in *ListProposalClustersRequest, opts ...grpc.CallOption) (*ListProposalClustersResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListProposalClustersResponse)
+	err := c.cc.Invoke(ctx, ProposalService_ListProposalClusters_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -124,7 +145,17 @@ type ProposalServiceServer interface {
 	// Commits one or more full-content file changes to a skill on a proposal
 	// branch, creating the branch (from the current base branch HEAD) if it
 	// doesn't already exist, or appending a commit to it otherwise.
-	ProposeChange(context.Context, *ProposeChangeRequest) (*Proposal, error)
+	//
+	// If another agent's open proposal for the same skill already produces
+	// byte-identical content (modulo whitespace normalization), no new branch
+	// is created: the caller is recorded as an endorser of that existing
+	// proposal and it is returned instead. See ProposeChangeResponse.
+	ProposeChange(context.Context, *ProposeChangeRequest) (*ProposeChangeResponse, error)
+	// Groups a skill's open proposals into clusters of proposals that edit
+	// overlapping regions of the same files - competing answers to what is
+	// probably the same defect. Purely derived from branch state; nothing is
+	// stored.
+	ListProposalClusters(context.Context, *ListProposalClustersRequest) (*ListProposalClustersResponse, error)
 	// Lists proposals, optionally filtered by skill and/or proposing agent.
 	ListProposals(context.Context, *ListProposalsRequest) (*ListProposalsResponse, error)
 	// Fetches a single proposal, including its unified diff against base.
@@ -146,8 +177,11 @@ type ProposalServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedProposalServiceServer struct{}
 
-func (UnimplementedProposalServiceServer) ProposeChange(context.Context, *ProposeChangeRequest) (*Proposal, error) {
+func (UnimplementedProposalServiceServer) ProposeChange(context.Context, *ProposeChangeRequest) (*ProposeChangeResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ProposeChange not implemented")
+}
+func (UnimplementedProposalServiceServer) ListProposalClusters(context.Context, *ListProposalClustersRequest) (*ListProposalClustersResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListProposalClusters not implemented")
 }
 func (UnimplementedProposalServiceServer) ListProposals(context.Context, *ListProposalsRequest) (*ListProposalsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListProposals not implemented")
@@ -196,6 +230,24 @@ func _ProposalService_ProposeChange_Handler(srv interface{}, ctx context.Context
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ProposalServiceServer).ProposeChange(ctx, req.(*ProposeChangeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ProposalService_ListProposalClusters_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListProposalClustersRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProposalServiceServer).ListProposalClusters(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ProposalService_ListProposalClusters_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProposalServiceServer).ListProposalClusters(ctx, req.(*ListProposalClustersRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -282,6 +334,10 @@ var ProposalService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ProposeChange",
 			Handler:    _ProposalService_ProposeChange_Handler,
+		},
+		{
+			MethodName: "ListProposalClusters",
+			Handler:    _ProposalService_ListProposalClusters_Handler,
 		},
 		{
 			MethodName: "ListProposals",
