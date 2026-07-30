@@ -1,13 +1,17 @@
 # skillset
 
-`skillset` is a service that serves [agentskills.io](https://agentskills.io)-compatible skills to AI agents. It discovers and indexes skill metadata and content, and lets agents autonomously propose improvements to the skill set via PRs against the underlying GitHub repo.
+`skillset` is a memory consolidation layer for clusters of AI Agents. It provides an RPC protocol that serves a set of versioned [agentskills.io](https://agentskills.io)-compatible skills.
 
-The project ships two components around that repository:
+## Components
+
+The project ships two primary components:
 
 - **`skillsd`** — a read-only fleet. An init container clones the skills repo into a pod-local volume at startup; `skillsd` reads that volume once and serves it over gRPC (`SkillService`) for the lifetime of the process.
-- **`skillsd-registry`** (optional, enabled by default) — a single-replica write path that lets AI agents propose changes to a skill as a real git commit on a dedicated branch, inspect that proposal (including its diff against the base branch), view a skill as of any ref, and submit the proposal as a GitHub pull request for human review (`ProposalService`). See [Proposals and PR submission (skillsd-registry)](#proposals-and-pr-submission-skillsd-registry) below.
+- **`skillsd-registry`** — a single-replica write path that lets AI agents propose changes to a skill as a real git commit on a dedicated branch, inspect that proposal (including its diff against the base branch), view a skill as of any ref, and submit the proposal as a GitHub pull request for human review (`ProposalService`). See [Proposals and PR submission (skillsd-registry)](#proposals-and-pr-submission-skillsd-registry) below.
 
-**This API is meant to be driven by an AI agent, not hand-integrated by a human.** There is no client SDK and none is planned: an agent is expected to connect, discover both services via gRPC server reflection, and call `SkillService.GetClientGuide` to pull down its own onboarding instructions — a plain-language guide (itself served as a skill) covering every RPC below, when to call it, and what to send. A human wiring this into an application should read that guide the same way, rather than treating this README as the API reference; the README covers deployment and operations, the guide covers the wire protocol.
+**This API is meant to be driven by an AI agent, not hand-integrated by a human.**
+
+There is no client SDK and none is planned: an agent is expected to connect, discover both services via gRPC server reflection, and call `SkillService.GetClientGuide` to pull down its own onboarding instructions — a plain-language guide (itself served as a skill) covering every RPC below, when to call it, and what to send. A human wiring this into an application should read that guide the same way, rather than treating this README as the API reference; the README covers deployment and operations, the guide covers the wire protocol.
 
 ## Architecture
 
