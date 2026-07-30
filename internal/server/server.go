@@ -4,6 +4,7 @@ import (
 	"context"
 
 	skillsv1 "github.com/araghukas/skillset/gen/skills/v1"
+	"github.com/araghukas/skillset/internal/clientguide"
 	"github.com/araghukas/skillset/internal/registry"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -44,6 +45,10 @@ func (s *Server) GetSkill(ctx context.Context, req *skillsv1.GetSkillRequest) (*
 		return nil, status.Errorf(codes.NotFound, "skill %q not found", req.GetSkillName())
 	}
 	return &skillsv1.GetSkillResponse{Skill: metadataFor(sk, req.GetIncludeContextFiles())}, nil
+}
+
+func (s *Server) GetClientGuide(ctx context.Context, req *skillsv1.GetClientGuideRequest) (*skillsv1.GetSkillResponse, error) {
+	return &skillsv1.GetSkillResponse{Skill: clientguide.Guide}, nil
 }
 
 // metadataFor returns sk's metadata, stripped of context files unless the

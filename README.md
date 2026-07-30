@@ -1,9 +1,13 @@
 # skillset
 
-`skillset` is a gRPC registry service for [agentskills.io](https://agentskills.io)-compatible agent skills. It discovers, indexes, and serves skill metadata and content — it does **not** execute skills. Skill definitions live in a git repository, and the project ships two components around that repository:
+`skillset` is a service that serves [agentskills.io](https://agentskills.io)-compatible skills to AI agents. It discovers and indexes skill metadata and content, and lets agents autonomously propose improvements to the skill set via PRs against the underlying GitHub repo.
+
+The project ships two components around that repository:
 
 - **`skillsd`** — a read-only fleet. An init container clones the skills repo into a pod-local volume at startup; `skillsd` reads that volume once and serves it over gRPC (`SkillService`) for the lifetime of the process.
 - **`skillsd-registry`** (optional, enabled by default) — a single-replica write path that lets AI agents propose changes to a skill as a real git commit on a dedicated branch, inspect that proposal (including its diff against the base branch), view a skill as of any ref, and submit the proposal as a GitHub pull request for human review (`ProposalService`). See [Proposals and PR submission (skillsd-registry)](#proposals-and-pr-submission-skillsd-registry) below.
+
+**This API is meant to be driven by an AI agent, not hand-integrated by a human.** There is no client SDK and none is planned: an agent is expected to connect, discover both services via gRPC server reflection, and call `SkillService.GetClientGuide` to pull down its own onboarding instructions — a plain-language guide (itself served as a skill) covering every RPC below, when to call it, and what to send. A human wiring this into an application should read that guide the same way, rather than treating this README as the API reference; the README covers deployment and operations, the guide covers the wire protocol.
 
 ---
 
@@ -14,7 +18,7 @@ flowchart TB
   Agent["AI Agent (pod)"]
 
   subgraph K8s["Kubernetes cluster"]
-    Read["skillsd\nread fleet, N replicas\nSkillService: ListSkills, GetSkill"]
+    Read["skillsd\nread fleet, N replicas\nSkillService: ListSkills, GetSkill,\nGetClientGuide"]
     SkillsVol[("skills-data volume\n(emptyDir)")]
     Write["skillsd-registry\nwrite path, 1 replica\nProposalService: ProposeChange, ListProposals,\nGetProposal, GetSkillAtRef, SubmitProposal"]
     RepoVol[("repo-data volume\n(PersistentVolumeClaim)")]
@@ -46,6 +50,14 @@ Each skill is a directory containing a `SKILL.md` file with YAML frontmatter (`n
 `registry.Load` walks the mounted skills directory once at startup, requires each skill's directory name to match its frontmatter `name`, and builds an in-memory index served over gRPC. There is no runtime re-indexing in `skillsd` — picking up new skills means restarting the pod so the init container re-clones the repo. (`skillsd-registry`, described below, is the exception: it's meant to track live upstream state, and periodically re-fetches its base branch in the background.)
 
 `internal/skillparse` — the frontmatter parsing and validation logic used above — is shared with `skillsd-registry`, so a skill read at a proposal branch or an arbitrary commit is validated exactly the same way as the static production index.
+
+---
+
+## Client guide (`GetClientGuide`) — start here if you're an agent
+
+An agent connecting to `skillsd` for the first time isn't expected to have read this README, a proto file, or any hand-written client docs — it's expected to call `SkillService.GetClientGuide` (no arguments) and take it from there. The response is a `GetSkillResponse`, the same shape `GetSkill` returns, so anything that already knows how to render a skill's `SkillMetadata`/`context_files` can render this one too; combined with gRPC server reflection (enabled on both services), that call is sufficient for an agent to fully onboard itself onto this API with no external documentation at all.
+
+Its content lives in [internal/clientguide/skillsd-client/SKILL.md](internal/clientguide/skillsd-client/SKILL.md), embedded into the server binary via `go:embed` (see [internal/clientguide](internal/clientguide)) rather than read from the skills repo the registry indexes — deliberately, since it's documentation for the API itself rather than API content: it ships versioned with the proto it describes, and stays available even if the skills repo is empty, misconfigured, or unreachable. It's never returned by `ListSkills` — it's a property of the service, not an entry in its catalog.
 
 ---
 

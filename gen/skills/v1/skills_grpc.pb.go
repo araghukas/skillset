@@ -19,8 +19,9 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	SkillService_ListSkills_FullMethodName = "/skills.v1.SkillService/ListSkills"
-	SkillService_GetSkill_FullMethodName   = "/skills.v1.SkillService/GetSkill"
+	SkillService_ListSkills_FullMethodName     = "/skills.v1.SkillService/ListSkills"
+	SkillService_GetSkill_FullMethodName       = "/skills.v1.SkillService/GetSkill"
+	SkillService_GetClientGuide_FullMethodName = "/skills.v1.SkillService/GetClientGuide"
 )
 
 // SkillServiceClient is the client API for SkillService service.
@@ -32,6 +33,11 @@ type SkillServiceClient interface {
 	ListSkills(ctx context.Context, in *ListSkillsRequest, opts ...grpc.CallOption) (*ListSkillsResponse, error)
 	// Fetches detailed metadata and context files for a specific skill.
 	GetSkill(ctx context.Context, in *GetSkillRequest, opts ...grpc.CallOption) (*GetSkillResponse, error)
+	// Fetches the client guide: a skill, embedded in the server binary rather
+	// than served from the skills repo ListSkills/GetSkill read from, that
+	// explains this API to a calling agent. Always available, and never
+	// listed by ListSkills.
+	GetClientGuide(ctx context.Context, in *GetClientGuideRequest, opts ...grpc.CallOption) (*GetSkillResponse, error)
 }
 
 type skillServiceClient struct {
@@ -62,6 +68,16 @@ func (c *skillServiceClient) GetSkill(ctx context.Context, in *GetSkillRequest, 
 	return out, nil
 }
 
+func (c *skillServiceClient) GetClientGuide(ctx context.Context, in *GetClientGuideRequest, opts ...grpc.CallOption) (*GetSkillResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetSkillResponse)
+	err := c.cc.Invoke(ctx, SkillService_GetClientGuide_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // SkillServiceServer is the server API for SkillService service.
 // All implementations must embed UnimplementedSkillServiceServer
 // for forward compatibility.
@@ -71,6 +87,11 @@ type SkillServiceServer interface {
 	ListSkills(context.Context, *ListSkillsRequest) (*ListSkillsResponse, error)
 	// Fetches detailed metadata and context files for a specific skill.
 	GetSkill(context.Context, *GetSkillRequest) (*GetSkillResponse, error)
+	// Fetches the client guide: a skill, embedded in the server binary rather
+	// than served from the skills repo ListSkills/GetSkill read from, that
+	// explains this API to a calling agent. Always available, and never
+	// listed by ListSkills.
+	GetClientGuide(context.Context, *GetClientGuideRequest) (*GetSkillResponse, error)
 	mustEmbedUnimplementedSkillServiceServer()
 }
 
@@ -86,6 +107,9 @@ func (UnimplementedSkillServiceServer) ListSkills(context.Context, *ListSkillsRe
 }
 func (UnimplementedSkillServiceServer) GetSkill(context.Context, *GetSkillRequest) (*GetSkillResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetSkill not implemented")
+}
+func (UnimplementedSkillServiceServer) GetClientGuide(context.Context, *GetClientGuideRequest) (*GetSkillResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetClientGuide not implemented")
 }
 func (UnimplementedSkillServiceServer) mustEmbedUnimplementedSkillServiceServer() {}
 func (UnimplementedSkillServiceServer) testEmbeddedByValue()                      {}
@@ -144,6 +168,24 @@ func _SkillService_GetSkill_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
+func _SkillService_GetClientGuide_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetClientGuideRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SkillServiceServer).GetClientGuide(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SkillService_GetClientGuide_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SkillServiceServer).GetClientGuide(ctx, req.(*GetClientGuideRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // SkillService_ServiceDesc is the grpc.ServiceDesc for SkillService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -158,6 +200,10 @@ var SkillService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetSkill",
 			Handler:    _SkillService_GetSkill_Handler,
+		},
+		{
+			MethodName: "GetClientGuide",
+			Handler:    _SkillService_GetClientGuide_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

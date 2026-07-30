@@ -130,6 +130,31 @@ func TestGetSkillWithBinaryAssetDoesNotFail(t *testing.T) {
 	}
 }
 
+func TestGetClientGuideIsNotListedByListSkills(t *testing.T) {
+	s := newTestServer(t)
+
+	guide, err := s.GetClientGuide(context.Background(), &skillsv1.GetClientGuideRequest{})
+	if err != nil {
+		t.Fatalf("expected GetClientGuide to succeed, got: %v", err)
+	}
+	if guide.Skill.Name != "skillsd-client" {
+		t.Fatalf("unexpected client guide skill: %+v", guide.Skill)
+	}
+	if len(guide.Skill.ContextFiles) == 0 {
+		t.Fatal("expected client guide to include its SKILL.md as a context file")
+	}
+
+	list, err := s.ListSkills(context.Background(), &skillsv1.ListSkillsRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, sk := range list.Skills {
+		if sk.Name == "skillsd-client" {
+			t.Fatalf("expected the embedded client guide to be excluded from ListSkills, got: %+v", list.Skills)
+		}
+	}
+}
+
 func TestListSkillsCategoryCombinedWithIncludeContextFiles(t *testing.T) {
 	s := newTestServer(t)
 

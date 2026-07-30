@@ -34,9 +34,7 @@ const (
 // real git commit on a dedicated branch, inspect that proposal (including
 // its diff against the base branch), view a skill as of any ref, and -
 // once ready for human review - submit the proposal as a GitHub pull
-// request. Proposal state lives entirely in the underlying git repository
-// and, once submitted, the GitHub pull request itself; this service does
-// not track a separate status field or perform any local merge.
+// request. Proposal state lives entirely in the underlying git repository.
 type ProposalServiceClient interface {
 	// Commits one or more full-content file changes to a skill on a proposal
 	// branch, creating the branch (from the current base branch HEAD) if it
@@ -121,9 +119,7 @@ func (c *proposalServiceClient) SubmitProposal(ctx context.Context, in *SubmitPr
 // real git commit on a dedicated branch, inspect that proposal (including
 // its diff against the base branch), view a skill as of any ref, and -
 // once ready for human review - submit the proposal as a GitHub pull
-// request. Proposal state lives entirely in the underlying git repository
-// and, once submitted, the GitHub pull request itself; this service does
-// not track a separate status field or perform any local merge.
+// request. Proposal state lives entirely in the underlying git repository.
 type ProposalServiceServer interface {
 	// Commits one or more full-content file changes to a skill on a proposal
 	// branch, creating the branch (from the current base branch HEAD) if it

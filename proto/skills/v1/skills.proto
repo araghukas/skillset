@@ -17,6 +17,12 @@ service SkillService {
 
   // Fetches detailed metadata and context files for a specific skill.
   rpc GetSkill (GetSkillRequest) returns (GetSkillResponse);
+
+  // Fetches the client guide: a skill, embedded in the server binary rather
+  // than served from the skills repo ListSkills/GetSkill read from, that
+  // explains this API to a calling agent. Always available, and never
+  // listed by ListSkills.
+  rpc GetClientGuide (GetClientGuideRequest) returns (GetSkillResponse);
 }
 
 // ==========================================
@@ -65,3 +71,7 @@ message GetSkillRequest {
 message GetSkillResponse {
   SkillMetadata skill = 1;
 }
+
+// GetClientGuideRequest has no fields: there is exactly one client guide,
+// the one embedded in the running server, so there's nothing to select.
+message GetClientGuideRequest {}

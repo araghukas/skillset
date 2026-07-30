@@ -89,6 +89,12 @@ grpcurl -plaintext -d '{
 }' localhost:8080 skills.v1.SkillService/GetSkill
 ```
 
+`GetClientGuide` — fetches the embedded usage guide for the API itself (not part of `ListSkills`):
+
+```bash
+grpcurl -plaintext -d '{}' localhost:8080 skills.v1.SkillService/GetClientGuide
+```
+
 Health check (via `grpc.health.v1.Health`, registered alongside `SkillService`
 in main.go):
 

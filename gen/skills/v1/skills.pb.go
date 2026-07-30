@@ -385,6 +385,44 @@ func (x *GetSkillResponse) GetSkill() *SkillMetadata {
 	return nil
 }
 
+// GetClientGuideRequest has no fields: there is exactly one client guide,
+// the one embedded in the running server, so there's nothing to select.
+type GetClientGuideRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetClientGuideRequest) Reset() {
+	*x = GetClientGuideRequest{}
+	mi := &file_skills_v1_skills_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetClientGuideRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetClientGuideRequest) ProtoMessage() {}
+
+func (x *GetClientGuideRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_skills_v1_skills_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetClientGuideRequest.ProtoReflect.Descriptor instead.
+func (*GetClientGuideRequest) Descriptor() ([]byte, []int) {
+	return file_skills_v1_skills_proto_rawDescGZIP(), []int{6}
+}
+
 var File_skills_v1_skills_proto protoreflect.FileDescriptor
 
 const file_skills_v1_skills_proto_rawDesc = "" +
@@ -419,11 +457,13 @@ const file_skills_v1_skills_proto_rawDesc = "" +
 	"skill_name\x18\x01 \x01(\tR\tskillName\x122\n" +
 	"\x15include_context_files\x18\x02 \x01(\bR\x13includeContextFiles\"B\n" +
 	"\x10GetSkillResponse\x12.\n" +
-	"\x05skill\x18\x01 \x01(\v2\x18.skills.v1.SkillMetadataR\x05skill2\x9e\x01\n" +
+	"\x05skill\x18\x01 \x01(\v2\x18.skills.v1.SkillMetadataR\x05skill\"\x17\n" +
+	"\x15GetClientGuideRequest2\xef\x01\n" +
 	"\fSkillService\x12I\n" +
 	"\n" +
 	"ListSkills\x12\x1c.skills.v1.ListSkillsRequest\x1a\x1d.skills.v1.ListSkillsResponse\x12C\n" +
-	"\bGetSkill\x12\x1a.skills.v1.GetSkillRequest\x1a\x1b.skills.v1.GetSkillResponseB6Z4github.com/araghukas/skillset/gen/skills/v1;skillsv1b\x06proto3"
+	"\bGetSkill\x12\x1a.skills.v1.GetSkillRequest\x1a\x1b.skills.v1.GetSkillResponse\x12O\n" +
+	"\x0eGetClientGuide\x12 .skills.v1.GetClientGuideRequest\x1a\x1b.skills.v1.GetSkillResponseB6Z4github.com/araghukas/skillset/gen/skills/v1;skillsv1b\x06proto3"
 
 var (
 	file_skills_v1_skills_proto_rawDescOnce sync.Once
@@ -437,7 +477,7 @@ func file_skills_v1_skills_proto_rawDescGZIP() []byte {
 	return file_skills_v1_skills_proto_rawDescData
 }
 
-var file_skills_v1_skills_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_skills_v1_skills_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_skills_v1_skills_proto_goTypes = []any{
 	(*SkillContextFile)(nil),      // 0: skills.v1.SkillContextFile
 	(*SkillMetadata)(nil),         // 1: skills.v1.SkillMetadata
@@ -445,21 +485,24 @@ var file_skills_v1_skills_proto_goTypes = []any{
 	(*ListSkillsResponse)(nil),    // 3: skills.v1.ListSkillsResponse
 	(*GetSkillRequest)(nil),       // 4: skills.v1.GetSkillRequest
 	(*GetSkillResponse)(nil),      // 5: skills.v1.GetSkillResponse
-	nil,                           // 6: skills.v1.SkillMetadata.MetadataEntry
-	(*timestamppb.Timestamp)(nil), // 7: google.protobuf.Timestamp
+	(*GetClientGuideRequest)(nil), // 6: skills.v1.GetClientGuideRequest
+	nil,                           // 7: skills.v1.SkillMetadata.MetadataEntry
+	(*timestamppb.Timestamp)(nil), // 8: google.protobuf.Timestamp
 }
 var file_skills_v1_skills_proto_depIdxs = []int32{
-	6, // 0: skills.v1.SkillMetadata.metadata:type_name -> skills.v1.SkillMetadata.MetadataEntry
+	7, // 0: skills.v1.SkillMetadata.metadata:type_name -> skills.v1.SkillMetadata.MetadataEntry
 	0, // 1: skills.v1.SkillMetadata.context_files:type_name -> skills.v1.SkillContextFile
 	1, // 2: skills.v1.ListSkillsResponse.skills:type_name -> skills.v1.SkillMetadata
-	7, // 3: skills.v1.ListSkillsResponse.indexed_at:type_name -> google.protobuf.Timestamp
+	8, // 3: skills.v1.ListSkillsResponse.indexed_at:type_name -> google.protobuf.Timestamp
 	1, // 4: skills.v1.GetSkillResponse.skill:type_name -> skills.v1.SkillMetadata
 	2, // 5: skills.v1.SkillService.ListSkills:input_type -> skills.v1.ListSkillsRequest
 	4, // 6: skills.v1.SkillService.GetSkill:input_type -> skills.v1.GetSkillRequest
-	3, // 7: skills.v1.SkillService.ListSkills:output_type -> skills.v1.ListSkillsResponse
-	5, // 8: skills.v1.SkillService.GetSkill:output_type -> skills.v1.GetSkillResponse
-	7, // [7:9] is the sub-list for method output_type
-	5, // [5:7] is the sub-list for method input_type
+	6, // 7: skills.v1.SkillService.GetClientGuide:input_type -> skills.v1.GetClientGuideRequest
+	3, // 8: skills.v1.SkillService.ListSkills:output_type -> skills.v1.ListSkillsResponse
+	5, // 9: skills.v1.SkillService.GetSkill:output_type -> skills.v1.GetSkillResponse
+	5, // 10: skills.v1.SkillService.GetClientGuide:output_type -> skills.v1.GetSkillResponse
+	8, // [8:11] is the sub-list for method output_type
+	5, // [5:8] is the sub-list for method input_type
 	5, // [5:5] is the sub-list for extension type_name
 	5, // [5:5] is the sub-list for extension extendee
 	0, // [0:5] is the sub-list for field type_name
@@ -476,7 +519,7 @@ func file_skills_v1_skills_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_skills_v1_skills_proto_rawDesc), len(file_skills_v1_skills_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   7,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
