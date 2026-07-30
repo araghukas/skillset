@@ -64,7 +64,7 @@ if git_secret_name:
 
 registry_secret_name = ''
 if os.path.exists('local/git-skillsd-registry-token'):
-    registry_secret_name = 'skillsd-registry-github'
+    registry_secret_name = 'skillsd-registry-git-auth'
     k8s_yaml(blob('''
 apiVersion: v1
 kind: Secret
