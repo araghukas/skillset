@@ -9,8 +9,6 @@ The project ships two components around that repository:
 
 **This API is meant to be driven by an AI agent, not hand-integrated by a human.** There is no client SDK and none is planned: an agent is expected to connect, discover both services via gRPC server reflection, and call `SkillService.GetClientGuide` to pull down its own onboarding instructions — a plain-language guide (itself served as a skill) covering every RPC below, when to call it, and what to send. A human wiring this into an application should read that guide the same way, rather than treating this README as the API reference; the README covers deployment and operations, the guide covers the wire protocol.
 
----
-
 ## Architecture
 
 ```mermaid
@@ -41,8 +39,6 @@ flowchart TB
 
 `skillsd` and `skillsd-registry` share one Helm chart ([charts/skillsd](charts/skillsd)) but run as independent Deployments — the read fleet scales horizontally and never mutates anything; the registry is a single writer serializing git operations on its own persistent volume. See [proto/skills/v1](proto/skills/v1) for the two services' full RPC definitions, and [internal/](internal/) for their implementations (`registry`/`server`/`storage` back `skillsd`; `gitrepo`/`proposals`/`githubpr`/`proposalserver`/`registryconfig` back `skillsd-registry`; `skillparse` is shared by both).
 
----
-
 ## Skill format
 
 Each skill is a directory containing a `SKILL.md` file with YAML frontmatter (`name`, `description` required; `license`, `compatibility`, `metadata`, `allowed-tools` optional), plus any supporting `scripts/`, `references/`, or `assets/` files. See the [agentskills.io specification](https://agentskills.io/specification) for the full format.
@@ -51,15 +47,11 @@ Each skill is a directory containing a `SKILL.md` file with YAML frontmatter (`n
 
 `internal/skillparse` — the frontmatter parsing and validation logic used above — is shared with `skillsd-registry`, so a skill read at a proposal branch or an arbitrary commit is validated exactly the same way as the static production index.
 
----
-
 ## Client guide (`GetClientGuide`) — start here if you're an agent
 
 An agent connecting to `skillsd` for the first time isn't expected to have read this README, a proto file, or any hand-written client docs — it's expected to call `SkillService.GetClientGuide` (no arguments) and take it from there. The response is a `GetSkillResponse`, the same shape `GetSkill` returns, so anything that already knows how to render a skill's `SkillMetadata`/`context_files` can render this one too; combined with gRPC server reflection (enabled on both services), that call is sufficient for an agent to fully onboard itself onto this API with no external documentation at all.
 
 Its content lives in [internal/clientguide/skillsd-client/SKILL.md](internal/clientguide/skillsd-client/SKILL.md), embedded into the server binary via `go:embed` (see [internal/clientguide](internal/clientguide)) rather than read from the skills repo the registry indexes — deliberately, since it's documentation for the API itself rather than API content: it ships versioned with the proto it describes, and stays available even if the skills repo is empty, misconfigured, or unreachable. It's never returned by `ListSkills` — it's a property of the service, not an entry in its catalog.
-
----
 
 ## Proposals and PR submission (skillsd-registry)
 
@@ -77,9 +69,11 @@ Branches are namespaced `proposals/<agent_id>/<skill_name>/<proposal_id>`, which
 
 Deploying it requires an HTTPS clone URL with push access and a GitHub token (used for both the `git push` and the PR-creation REST call) — see the `registry.*` values in [charts/skillsd/values.yaml](charts/skillsd/values.yaml).
 
----
+# For developers
 
-## GitHub authentication
+Everything above describes the API as an agent (or a human reading on its behalf) would encounter it. The sections below are for whoever deploys and operates `skillset` itself — GitHub credentials, environment configuration, and running the stack locally.
+
+### GitHub authentication
 
 Both components authenticate to GitHub the same way — an HTTPS clone URL plus a GitHub token — just scoped to what each one actually needs:
 
@@ -94,9 +88,7 @@ Both components authenticate to GitHub the same way — an HTTPS clone URL plus 
 
 `skillsd-registry` needs to authenticate two different operations — the `git push` of a proposal branch and the GitHub API call that opens the pull request — and a single GitHub token can do both over HTTPS. Scope each token as narrowly as your GitHub plan allows: a fine-grained PAT limited to the one skills repo, with just `Contents: read` for `skillsd` or `Contents` + `Pull requests` write access for `skillsd-registry`, or a classic PAT with `repo` scope if fine-grained tokens aren't available. Leaving `GITHUB_TOKEN`/`registry.github.tokenSecret` unset runs `skillsd-registry` in propose-only mode (`ProposeChange`, `GetProposal`, etc. still work; `SubmitProposal` is disabled).
 
----
-
-## Configuration
+### Configuration
 
 Both binaries load configuration from environment variables on startup.
 
@@ -128,9 +120,7 @@ Both binaries load configuration from environment variables on startup.
 | `MAX_FILE_CONTENT_BYTES` | `1048576` (1 MiB) | Cap on a single `FileChange`'s content in `ProposeChange`, checked before the gRPC transport would otherwise reject an oversized message |
 | `LOG_LEVEL` | `info` | Minimum slog level emitted |
 
----
-
-## Local development
+### Local development
 
 Local dev runs on a `kind` cluster provisioned by `ctlptl`, with `Tilt` handling build/deploy/live-reload. Requires `go`, `docker`, `kind`, `ctlptl`, `kubectl`, `helm`, `tilt`, and `buf` on `PATH`.
 
