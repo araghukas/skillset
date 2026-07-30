@@ -34,7 +34,7 @@ spec:
               set -eu
               CLONE_URL="$GIT_URL"
               {{- if .Values.skillsRepo.tokenSecret }}
-              CLONE_URL="https://x-access-token:${GIT_TOKEN}@${GIT_URL#https://}"
+              CLONE_URL="${GIT_URL%%://*}://x-access-token:${GIT_TOKEN}@${GIT_URL#*://}"
               {{- end }}
               git clone --depth 1 --branch "$GIT_BRANCH" "$CLONE_URL" "$SKILLS_DIR"
           env:

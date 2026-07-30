@@ -29,6 +29,25 @@
 
 allow_k8s_contexts('kind-skillsd')
 
+# Local Gitea stand-in for GitHub - see local/gitea.yaml and
+# local/gitea-init.sh. Deliberately NOT managed by Tilt: Gitea's deployment
+# is owned by `make gitea-up`, which applies it and then seeds it (admin
+# user, repo, tokens, content) into an emptyDir. Handing the same manifest
+# to Tilt would re-apply it with Tilt's own injected labels, which bumps the
+# Deployment revision and - with strategy: Recreate - replaces the pod,
+# discarding the emptyDir and everything gitea-init.sh just put in it. So
+# Tilt only port-forwards it.
+#
+# The port-forward is wrapped in a retry loop because Tilt does not restart a
+# serve_cmd that exits, and kubectl port-forward exits whenever the Gitea pod
+# it is bound to goes away.
+local_resource(
+    'gitea',
+    serve_cmd='while true; do kubectl --context kind-skillsd port-forward svc/gitea 3000:3000; sleep 2; done',
+    readiness_probe=probe(http_get=http_get_action(port=3000, path='/api/healthz')),
+    labels=['gitea'],
+)
+
 docker_build(
     'localhost:5005/skillsd',
     '.',
@@ -37,6 +56,12 @@ docker_build(
 )
 
 load("ext://base64", "encode_base64")
+
+# Watch the token files explicitly: os.path.exists() isn't a tracked read, so
+# without these a `make gitea-up` that (re)mints tokens mid-session would
+# leave Tilt holding the old secrets - or none at all.
+watch_file('local/git-skillsd-token')
+watch_file('local/git-skillsd-registry-token')
 
 # Read-only repo auth: create a Secret from local/git-skillsd-token, if present
 

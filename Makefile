@@ -53,8 +53,9 @@ cluster-up: ## Create the local kind cluster + registry
 	ctlptl apply -f $(CLUSTER_CFG)
 
 .PHONY: cluster-down
-cluster-down: ## Delete the local kind cluster + registry
+cluster-down: ## Delete the local kind cluster + registry, and the now-unusable Gitea tokens with it
 	ctlptl delete -f $(CLUSTER_CFG)
+	rm -f local/git-skillsd-token local/git-skillsd-registry-token
 
 ## --- Helm ---
 
@@ -75,9 +76,28 @@ check-prereqs: ## Verify required local tools are installed
 	done
 
 .PHONY: dev
-dev: check-prereqs cluster-up ## Start the local cluster (if needed) and the Tilt dev loop
+dev: check-prereqs cluster-up gitea-up ## Start the local cluster (if needed), bootstrap Gitea, and start the Tilt dev loop
 	tilt up --debug --stream
+
+.PHONY: dev-down
+dev-down: ## Stop the Tilt dev loop (leaves Gitea, and its tokens, up for the next `make dev`; use gitea-down to reset that too)
+	tilt down
+
+.PHONY: gitea-up
+gitea-up: cluster-up ## Bootstrap the local Gitea stand-in for GitHub (idempotent; see local/gitea-init.sh)
+	./local/gitea-init.sh
+
+.PHONY: gitea-down
+gitea-down: ## Tear down the local Gitea instance and its bootstrapped tokens, for a clean re-test
+	kubectl --context $(KIND_CONTEXT) delete -f local/gitea.yaml --ignore-not-found
+	rm -f local/git-skillsd-token local/git-skillsd-registry-token
 
 .PHONY: logs
 logs: ## Tail skillsd logs on the local cluster
 	kubectl --context $(KIND_CONTEXT) logs -l app.kubernetes.io/instance=$(RELEASE) -f
+
+## --- Verification ---
+
+.PHONY: verify
+verify: ## Run gRPC verification scripts against the running local deployment
+	./local/verify/run-all.sh

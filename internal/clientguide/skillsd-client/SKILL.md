@@ -58,7 +58,13 @@ fetch it with `GetClientGuide` instead.
   `metadata["category"]` matches exactly.
 - `include_context_files` defaults to leaving `context_files` empty — set it
   `true` only once you actually need file contents, since it inflates the
-  response with every file in every skill directory.
+  response with every file in every skill directory. A full listing this way
+  can exceed most gRPC clients' default 4 MiB max-receive-message-size
+  (`skillsd` itself is typically configured to allow responses up to 8 MiB —
+  check `grpcMaxRecvMsgSizeMiB` on your deployment). If you hit
+  `ResourceExhausted: received message larger than max`, raise your client's
+  max message size (e.g. `grpcurl -max-msg-sz <bytes>`) rather than assuming
+  the server misbehaved.
 - In practice: call `ListSkills({})` first (metadata only, cheap) to decide
   *which* skill you want, matching the request against each skill's
   `description` — that field is written to be matched against, the way a
@@ -88,7 +94,9 @@ grpcurl -plaintext -d '{
 
 Binary/non-UTF-8 files (images, etc.) are silently omitted from
 `context_files` since the field is a proto3 string — expect a skill's
-`assets/` directory to be incomplete if it holds binaries.
+`assets/` directory to be incomplete if it holds binaries. The same
+max-message-size caveat as `ListSkills` applies here, though it's less
+likely to bite since this is one skill's files rather than every skill's.
 
 **Keep `SkillMetadata.commit`.** Every skill you fetch carries the git commit
 its content came from. You need it later, in `ReportOutcome` — a report that

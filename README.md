@@ -70,12 +70,19 @@ RPC definitions live in [proto/skills/v1](proto/skills/v1); implementations in [
 Local dev runs on a `kind` cluster provisioned by `ctlptl`, with Tilt handling build/deploy/live-reload. Requires `go`, `docker`, `kind`, `ctlptl`, `kubectl`, `helm`, `tilt`, and `buf` on `PATH`.
 
 ```bash
-make dev             # cluster-up, then tilt up
-make cluster-down    # tear down
+make dev             # cluster-up, bootstrap a local Gitea stand-in for GitHub, then tilt up
+make dev-down        # tilt down, keeping the cluster (and the local Gitea) up
+make cluster-down    # tear down the cluster entirely
+make verify          # run the gRPC check scripts in local/verify/ against the running deployment
 make help            # full target list: build, test, vet, proto codegen, docker build, helm lint/template, log tailing, ...
 ```
 
-See [local/README.md](local/README.md) for a full `grpcurl` walkthrough of both services once the local cluster is up, including how to enable `skillsd-registry` locally.
+`make dev` needs no GitHub account or repo: it stands up a throwaway Gitea
+instance in the cluster and points both `skillsd` and `skillsd-registry` at
+it, so the full read + propose + submit-PR path works entirely offline. See
+[local/README.md](local/README.md) for how that works, a full `grpcurl`
+walkthrough of both services, the `local/verify/` check scripts, and how to
+point at a real GitHub repo instead.
 
 ## License
 

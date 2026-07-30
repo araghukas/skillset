@@ -10,17 +10,19 @@ image:
   pullPolicy: IfNotPresent
 
 skillsRepo:
-  # Point this at a real (or throwaway public) skills repo to test against.
-  # A public repo needs no auth at all; see tokenSecret below for private.
-  url: "https://github.com/araghukas/skillset-skills.git"
+  # Points at the throwaway Gitea instance bootstrapped by `make gitea-up`
+  # (see local/gitea.yaml, local/gitea-init.sh) - it clones and pushes
+  # exactly like a real GitHub repo would, without needing one. Point this
+  # at a real GitHub repo instead if you'd rather test against that.
+  url: "http://gitea:3000/skillset-admin/skills.git"
   branch: main
   # Left empty here; the Tiltfile sets this to a generated secret name if
-  # local/git-skillsd-token is present.
+  # local/git-skillsd-token is present (created by `make gitea-up`).
   tokenSecret: ""
 
 # registry is only actually deployed if local/git-skillsd-registry-token is present (see
-# Tiltfile) - fill in skillsRepo.url/github.owner+repo here first if you
-# want to exercise the proposal/PR write path locally.
+# Tiltfile) - `make gitea-up` creates it automatically, pointed at the same
+# local Gitea instance as skillsRepo above.
 registry:
   image:
     repository: localhost:5005/skillsd
@@ -30,11 +32,15 @@ registry:
   skillsRepo:
     # registry.github.tokenSecret authenticates both the push and the PR
     # API. Needs push access on whatever repo/branch this points at.
-    url: "https://github.com/araghukas/skillset-skills.git"
+    url: "http://gitea:3000/skillset-admin/skills.git"
     baseBranch: main
   github:
-    owner: "araghukas"
-    repo: "skillset-skills"
+    owner: "skillset-admin"
+    repo: "skills"
+    # Gitea's REST API deliberately mirrors GitHub's for pull requests, so
+    # pointing SubmitProposal's PR-creation call at Gitea's API root works
+    # without any code changes.
+    apiBaseURL: "http://gitea:3000/api/v1"
 
   # Open a PR for a particular proposal once 3 agents have endorsed it
   autoSubmitEndorsements: 3

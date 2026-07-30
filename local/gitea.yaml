@@ -1,0 +1,83 @@
+# A throwaway Gitea instance standing in for GitHub in local dev: it serves
+# both a real smart-HTTP git remote (for skillsd's clone and
+# skillsd-registry's push) and a GitHub-API-compatible endpoint (Gitea's
+# REST API mirrors GitHub's for pull requests), so nothing in skillset's
+# code needs to know it isn't really GitHub.
+#
+# SQLite-backed, single replica, emptyDir storage - state is wiped whenever
+# the pod restarts, which is the point: `make gitea-down` gives you a clean
+# slate. Bootstrapped (admin user, repo, tokens, seed content) by
+# local/gitea-init.sh, not by this manifest.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gitea
+  labels:
+    app.kubernetes.io/name: gitea
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: gitea
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: gitea
+    spec:
+      containers:
+        - name: gitea
+          image: gitea/gitea:1.22
+          ports:
+            - containerPort: 3000
+              name: http
+          env:
+            - name: GITEA__security__INSTALL_LOCK
+              value: "true"
+            - name: GITEA__server__ROOT_URL
+              value: "http://gitea:3000/"
+            - name: GITEA__server__START_SSH_SERVER
+              value: "false"
+            - name: GITEA__service__DISABLE_REGISTRATION
+              value: "true"
+            - name: GITEA__openid__ENABLE_OPENID_SIGNIN
+              value: "false"
+            - name: GITEA__database__DB_TYPE
+              value: "sqlite3"
+            # Info level otherwise logs a "PING DATABASE" + "router:
+            # completed GET /api/healthz" line for every readiness/liveness
+            # probe hit (every 5-10s) - Warn drops that noise without
+            # muting real problems.
+            - name: GITEA__log__LEVEL
+              value: "Warn"
+          volumeMounts:
+            - name: gitea-data
+              mountPath: /data
+          readinessProbe:
+            httpGet:
+              path: /api/healthz
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /api/healthz
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+      volumes:
+        - name: gitea-data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gitea
+spec:
+  selector:
+    app.kubernetes.io/name: gitea
+  ports:
+    - port: 3000
+      targetPort: http
+      name: http
