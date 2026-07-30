@@ -84,7 +84,7 @@ grpcurl -plaintext -d '{
 
 ```bash
 grpcurl -plaintext -d '{
-  "skill_name": "frontend-design",
+  "skill_name": "algorithmic-art",
   "include_context_files": true
 }' localhost:8080 skills.v1.SkillService/GetSkill
 ```
@@ -117,18 +117,21 @@ the diff):
 
 ```bash
 grpcurl -plaintext -d '{
-  "skill_name": "frontend-design",
+  "skill_name": "internal-comms",
   "agent_id": "agent-1",
   "proposal_id": "fix-typo",
   "commit_message": "fix typo in description",
-  "files": [{"file_path": "SKILL.md", "content": "---\nname: frontend-design\ndescription: designs frontends, fixed\n---\nbody\n"}]
+  "files": [{"file_path": "SKILL.md", "content": "---\nname: internal-comms\ndescription: A set of resources to help me write all kinds of internal communications, using the formats that my company likes to use. Claude should use this skill whenever asked to write some sort of internal communications (status reports, leadership updates, 3P updates, company newsletters, FAQs, incident reports, project updates, etc.).\nlicense: Complete terms in LICENSE.txt\n---\n\n## When to use this skill\nTo write internal communications, use this skill for:\n- 3P updates (Progress, Plans, Problems)\n- Company newsletters\n- FAQ responses\n- Status reports\n- Leadership updates\n- Project updates\n- Incident reports\n\n## How to use this skill\n\nTo write any internal communication:\n\n1. **Identify the communication type** from the request\n2. **Load the appropriate guideline file** from the `examples/` directory:\n    - `examples/3p-updates.md` - For Progress/Plans/Problems team updates\n    - `examples/company-newsletter.md` - For company-wide newsletters\n    - `examples/faq-answers.md` - For answering frequently asked questions\n    - `examples/general-comms.md` - For anything else that doesn'\''t explicitly match one of the above\n3. **Follow the specific instructions** in that file for formatting, tone, and content gathering\n\nIf the communication type doesn'\''t match any existing guideline, ask for clarification or more context about the desired format.\n\n## Keywords\n3P updates, company newsletter, company comms, weekly update, FAQs, common questions, updates, internal comms\n"}]
 }' localhost:8081 skills.v1.ProposalService/ProposeChange
 ```
+
+(Re-running this exact call fails with `cannot create empty commit: clean working tree`
+once the branch already has this content committed - expected, not a bug.)
 
 Inspect it (includes the unified diff against base):
 
 ```bash
-grpcurl -plaintext -d '{"branch": "proposals/agent-1/frontend-design/fix-typo"}' \
+grpcurl -plaintext -d '{"branch": "proposals/agent-1/internal-comms/fix-typo"}' \
   localhost:8081 skills.v1.ProposalService/GetProposal
 ```
 
@@ -136,13 +139,13 @@ View the skill as of that proposal branch, or as of the base branch
 (`ref` empty):
 
 ```bash
-grpcurl -plaintext -d '{"skill_name": "frontend-design", "ref": "proposals/agent-1/frontend-design/fix-typo"}' \
+grpcurl -plaintext -d '{"skill_name": "internal-comms", "ref": "proposals/agent-1/internal-comms/fix-typo"}' \
   localhost:8081 skills.v1.ProposalService/GetSkillAtRef
 ```
 
 Push the branch and open a real GitHub pull request for human review:
 
 ```bash
-grpcurl -plaintext -d '{"branch": "proposals/agent-1/frontend-design/fix-typo"}' \
+grpcurl -plaintext -d '{"branch": "proposals/agent-1/internal-comms/fix-typo"}' \
   localhost:8081 skills.v1.ProposalService/SubmitProposal
 ```
