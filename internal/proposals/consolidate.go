@@ -112,7 +112,7 @@ func normalizeContent(b []byte) []byte {
 // be turned into an endorsement without ever creating a branch to abandon.
 func applyChanges(files map[string][]byte, subPath, skillName string, changes []*skillsv1.FileChange) map[string][]byte {
 	out := make(map[string][]byte, len(files))
-	maps.Copy(files, out)
+	maps.Copy(out, files)
 
 	for _, fc := range changes {
 		key := path.Join(subPath, skillName, fc.GetFilePath())
