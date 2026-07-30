@@ -35,3 +35,11 @@ registry:
   github:
     owner: "araghukas"
     repo: "skillset-skills"
+
+  # Open a PR for a particular proposal once 3 agents have endorsed it
+  autoSubmitEndorsements: 3
+
+  # Disable database backups for local deployment
+  evidence:
+    persistence:
+      enabled: false

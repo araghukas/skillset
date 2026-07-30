@@ -162,9 +162,15 @@ registry:
     retention: 2160h # 90 days
     rollupInterval: 24h
 
+    # persistence is the PVC backing dbPath above - the evidence store's
+    # only piece of non-git state.
     persistence:
+      # enabled: false uses an emptyDir instead, so the evidence database
+      # is lost on pod restart. Only reasonable for a short-lived test
+      # deployment.
       enabled: true
       size: 1Gi
+      # storageClassName: "" uses the cluster's default StorageClass.
       storageClassName: ""
 
     backup:
