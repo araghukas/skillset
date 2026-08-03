@@ -84,6 +84,13 @@ it, so the full read + propose + submit-PR path works entirely offline.
 See
 [local/README.md](local/README.md).
 
+## Known limitations
+
+This is a work in progress. The following are known limitations:
+
+- **GitHub auth needs work:** PAT-based auth is rate-limited. `skillset` doesn't hit the GitHub API often today, but that could become a problem at scale.
+- **Write-path bottleneck:** `skillsd-registry` is a singleton with its own volume, which is the simplest way to serialize writes, but represents a scaling limit down the line.
+
 ## License
 
 See [LICENSE](LICENSE).
