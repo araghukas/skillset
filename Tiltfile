@@ -46,6 +46,10 @@
 
 allow_k8s_contexts('kind-skillsd')
 
+github_app = None
+if os.path.exists('local/github-app.json'):
+    github_app = read_json('local/github-app.json')
+
 # Local Gitea stand-in for GitHub - see local/gitea.yaml and
 # local/gitea-init.sh. Deliberately NOT managed by Tilt: Gitea's deployment
 # is owned by `make gitea-up`, which applies it and then seeds it (admin
@@ -58,12 +62,13 @@ allow_k8s_contexts('kind-skillsd')
 # The port-forward is wrapped in a retry loop because Tilt does not restart a
 # serve_cmd that exits, and kubectl port-forward exits whenever the Gitea pod
 # it is bound to goes away.
-local_resource(
-    'gitea',
-    serve_cmd='while true; do kubectl --context kind-skillsd port-forward svc/gitea 3000:3000; sleep 2; done',
-    readiness_probe=probe(http_get=http_get_action(port=3000, path='/api/healthz')),
-    labels=['gitea'],
-)
+if not github_app:
+    local_resource(
+        'gitea',
+        serve_cmd='while true; do kubectl --context kind-skillsd port-forward svc/gitea 3000:3000; sleep 2; done',
+        readiness_probe=probe(http_get=http_get_action(port=3000, path='/api/healthz')),
+        labels=['gitea'],
+    )
 
 docker_build(
     'localhost:5005/skillsd',
@@ -85,9 +90,7 @@ watch_file('local/github-app.json')
 # below: the chart rejects having both set on the same component, and an app
 # is the more deliberate choice of the two to have made.
 
-github_app = None
-if os.path.exists('local/github-app.json'):
-    github_app = read_json('local/github-app.json')
+if github_app:
     watch_file(github_app['privateKeyPath'])
 
     k8s_yaml(blob('''
