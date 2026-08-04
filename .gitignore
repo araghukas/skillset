@@ -2,6 +2,7 @@
 
 /local/git-skillsd-token
 /local/git-skillsd-registry-token
+/local/github-app.json
 *.pem
 *.key
 id_rsa*

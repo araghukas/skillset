@@ -20,6 +20,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/format/diff"
 	"github.com/go-git/go-git/v5/plumbing/object"
+	"github.com/go-git/go-git/v5/plumbing/transport"
 	githttp "github.com/go-git/go-git/v5/plumbing/transport/http"
 )
 
@@ -39,26 +40,41 @@ type CommitInfo struct {
 	AuthoredAt string
 }
 
+// TokenSource yields the credential used as the HTTPS password for clone,
+// fetch, and push. It's satisfied by internal/githubauth's static-token and
+// GitHub App sources; declared here so this package stays independent of how
+// the credential is obtained.
+type TokenSource interface {
+	Token(ctx context.Context) (string, error)
+}
+
 // Repo is a single git working copy, safe for concurrent use: all mutating
 // operations (checkout, commit, fetch, push) serialize on an internal mutex.
 type Repo struct {
 	mu         sync.Mutex
 	repo       *git.Repository
-	auth       *githttp.BasicAuth
+	tokens     TokenSource
 	baseBranch string
 }
 
 // Open opens the git working copy at dir, cloning it from cloneURL first if
-// dir doesn't yet contain a repository. Authentication currently uses token
-// over HTTPS.
-func Open(ctx context.Context, dir, cloneURL, baseBranch, token string) (*Repo, error) {
-
-	// TODO: explore alternate and/or more secure options for Auth
-	auth := &githttp.BasicAuth{Username: "x-access-token", Password: token}
+// dir doesn't yet contain a repository.
+//
+// tokens supplies the HTTPS credential; a nil TokenSource means
+// unauthenticated access, which only works for a public repository. It is
+// consulted per network operation rather than once here: a GitHub App
+// installation token expires within the hour, and this process is expected
+// to outlive many of them.
+func Open(ctx context.Context, dir, cloneURL, baseBranch string, tokens TokenSource) (*Repo, error) {
+	r := &Repo{tokens: tokens, baseBranch: baseBranch}
 
 	repo, err := git.PlainOpen(dir)
 	switch {
 	case errors.Is(err, git.ErrRepositoryNotExists):
+		auth, authErr := r.auth(ctx)
+		if authErr != nil {
+			return nil, authErr
+		}
 		repo, err = git.PlainCloneContext(ctx, dir, false, &git.CloneOptions{
 			URL:           cloneURL,
 			Auth:          auth,
@@ -72,7 +88,28 @@ func Open(ctx context.Context, dir, cloneURL, baseBranch, token string) (*Repo, 
 		return nil, fmt.Errorf("gitrepo: opening %s: %w", dir, err)
 	}
 
-	return &Repo{repo: repo, auth: auth, baseBranch: baseBranch}, nil
+	r.repo = repo
+	return r, nil
+}
+
+// auth builds the HTTPS credential for one network operation. It returns a
+// nil AuthMethod when no TokenSource is configured, which go-git reads as an
+// unauthenticated request.
+//
+// The "x-access-token" username is what GitHub expects alongside an
+// installation token or a PAT; Gitea accepts any non-empty username too.
+func (r *Repo) auth(ctx context.Context) (transport.AuthMethod, error) {
+	if r.tokens == nil {
+		return nil, nil
+	}
+	token, err := r.tokens.Token(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("gitrepo: obtaining token: %w", err)
+	}
+	if token == "" {
+		return nil, nil
+	}
+	return &githttp.BasicAuth{Username: "x-access-token", Password: token}, nil
 }
 
 // BaseBranch returns the name of the branch proposals and PRs target.
@@ -92,10 +129,15 @@ func (r *Repo) RefreshBase(ctx context.Context) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	auth, err := r.auth(ctx)
+	if err != nil {
+		return err
+	}
+
 	refSpec := config.RefSpec(fmt.Sprintf("+refs/heads/%s:refs/remotes/origin/%s", r.baseBranch, r.baseBranch))
-	err := r.repo.FetchContext(ctx, &git.FetchOptions{
+	err = r.repo.FetchContext(ctx, &git.FetchOptions{
 		RemoteName: "origin",
-		Auth:       r.auth,
+		Auth:       auth,
 		RefSpecs:   []config.RefSpec{refSpec},
 	})
 	if err != nil && !errors.Is(err, git.NoErrAlreadyUpToDate) {
@@ -307,9 +349,14 @@ func (r *Repo) Push(ctx context.Context, branch string, alsoRefs ...string) erro
 		refSpecs = append(refSpecs, config.RefSpec(fmt.Sprintf("+%s:%s", ref, ref)))
 	}
 
-	err := r.repo.PushContext(ctx, &git.PushOptions{
+	auth, err := r.auth(ctx)
+	if err != nil {
+		return err
+	}
+
+	err = r.repo.PushContext(ctx, &git.PushOptions{
 		RemoteName: "origin",
-		Auth:       r.auth,
+		Auth:       auth,
 		RefSpecs:   refSpecs,
 	})
 	if err != nil && !errors.Is(err, git.NoErrAlreadyUpToDate) {

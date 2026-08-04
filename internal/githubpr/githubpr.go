@@ -13,6 +13,13 @@ import (
 	"strings"
 )
 
+// TokenSource yields the bearer token for a request. It's satisfied by
+// internal/githubauth's static-token and GitHub App sources; declared here
+// so this package stays independent of how the credential is obtained.
+type TokenSource interface {
+	Token(ctx context.Context) (string, error)
+}
+
 // Client creates pull requests against a single GitHub (or GitHub
 // Enterprise) repository.
 type Client struct {
@@ -20,13 +27,16 @@ type Client struct {
 	baseURL    string
 	owner      string
 	repo       string
-	token      string
+	tokens     TokenSource
 }
 
 // New returns a Client for owner/repo. baseURL defaults to
-// https://api.github.com when empty; override for GitHub Enterprise. token
-// is used as a bearer token and must have pull-request write access.
-func New(baseURL, owner, repo, token string) *Client {
+// https://api.github.com when empty; override for GitHub Enterprise.
+//
+// tokens supplies the bearer token, which must carry pull-request write
+// access. It is consulted per request rather than once here, because a
+// GitHub App installation token expires within the hour.
+func New(baseURL, owner, repo string, tokens TokenSource) *Client {
 	if baseURL == "" {
 		baseURL = "https://api.github.com"
 	}
@@ -35,7 +45,7 @@ func New(baseURL, owner, repo, token string) *Client {
 		baseURL:    strings.TrimSuffix(baseURL, "/"),
 		owner:      owner,
 		repo:       repo,
-		token:      token,
+		tokens:     tokens,
 	}
 }
 
@@ -66,6 +76,14 @@ func (c *Client) CreatePullRequest(ctx context.Context, in PullRequestInput) (*P
 		return nil, fmt.Errorf("githubpr: encoding request: %w", err)
 	}
 
+	if c.tokens == nil {
+		return nil, fmt.Errorf("githubpr: no credential configured")
+	}
+	token, err := c.tokens.Token(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("githubpr: obtaining token: %w", err)
+	}
+
 	url := fmt.Sprintf("%s/repos/%s/%s/pulls", c.baseURL, c.owner, c.repo)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
@@ -73,7 +91,7 @@ func (c *Client) CreatePullRequest(ctx context.Context, in PullRequestInput) (*P
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 
 	resp, err := c.httpClient.Do(req)

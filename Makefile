@@ -9,6 +9,13 @@ CLUSTER_CFG   := local/cluster.yaml
 VALUES        := local/values.yaml
 GRPC_PORT     := 8080
 
+# Upstream repo the local Gitea stand-in is seeded from (see local/gitea-init.sh).
+# Override on the command line: make gitea-up GITEA_SEED_URL=https://github.com/me/my-skills.git
+GITEA_SEED_URL ?= https://github.com/anthropics/skills.git
+GITEA_SEED_REF ?= main
+export GITEA_SEED_URL
+export GITEA_SEED_REF
+
 .PHONY: help
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
@@ -16,9 +23,10 @@ help: ## Show this help
 ## --- Go ---
 
 .PHONY: build
-build: ## Build the skillsd and skillsd-registry binaries into ./bin
+build: ## Build the skillsd, skillsd-registry, and skillsd-init binaries into ./bin
 	go build -o bin/$(APP) ./cmd/skillsd
 	go build -o bin/$(APP)-registry ./cmd/skillsd-registry
+	go build -o bin/$(APP)-init ./cmd/skillsd-init
 
 .PHONY: test
 test: ## Run the test suite

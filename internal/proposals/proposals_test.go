@@ -69,7 +69,7 @@ func newTestService(t *testing.T, skillName, skillMD string) (*Service, string) 
 		t.Fatal(err)
 	}
 
-	repo, err := gitrepo.Open(context.Background(), t.TempDir(), originDir, branch, "")
+	repo, err := gitrepo.Open(context.Background(), t.TempDir(), originDir, branch, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

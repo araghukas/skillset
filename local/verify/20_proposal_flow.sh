@@ -77,7 +77,7 @@ if grpcurl -plaintext -d "{\"branch\": \"$BRANCH\"}" "$REGISTRY_ADDR" skills.v1.
 else
   # Submission failed: only a "disabled" error is expected/acceptable here.
   if grep -qi "disabled" "$submit_out"; then
-    echo "  skip - SubmitProposal is disabled on this deployment (registry.submitProposalEnabled=false or no GitHub token configured)"
+    echo "  skip - SubmitProposal is disabled on this deployment (registry.submitProposalEnabled=false or no GitHub auth configured)"
   else
     fail "SubmitProposal failed unexpectedly: $(cat "$submit_out")"
   fi
