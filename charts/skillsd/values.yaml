@@ -1,3 +1,5 @@
+namespace: ""
+
 replicaCount: 2
 
 image:
@@ -7,8 +9,7 @@ image:
 
 grpcAddr: ":8080"
 
-# logLevel sets the minimum slog level emitted by skillsd, e.g. "debug",
-# "info", "warn", "error".
+# logLevel sets the minimum slog level for skillsd and skillsd-registry.
 logLevel: info
 
 # grpcMaxRecvMsgSizeMiB / grpcMaxSendMsgSizeMiB cap the size (in MiB) of a
@@ -70,11 +71,14 @@ mountPath: /skills
 
 resources: {}
 
-# registry configures the optional skillsd-registry component: a
-# single-replica, persistent write path that lets AI agents propose changes
-# to skills as git commits and submit them as GitHub pull requests for
-# human review. Enabled by default; the read-only skillsd fleet above also
-# works standalone if you set this to false.
+# registry configures the skillsd-registry component: a single-replica,
+# persistent write path that lets AI agents propose changes to skills as git
+# commits and submit them as GitHub pull requests for human review, and that
+# collects the outcome reports backing those proposals (see evidence below).
+#
+# Deployed by default. Setting enabled: false drops it entirely, leaving the
+# read-only skillsd fleet above to run standalone - a read-only deployment
+# with no propose or evidence path at all.
 registry:
   enabled: true
 
@@ -131,8 +135,9 @@ registry:
   # submitProposalEnabled controls whether the SubmitProposal RPC is allowed
   # to push a proposal's branch and open a pull request. ProposeChange,
   # GetProposal, ListProposals, and GetSkillAtRef all work regardless -
-  # this only gates the final push+PR step. Configuring no credential under
-  # github below is by itself enough to run in propose-only mode.
+  # this only gates the final push+PR step. Setting it false is the explicit
+  # way to run propose-only; configuring no credential under github below
+  # has the same effect implicitly.
   submitProposalEnabled: true
 
   # autoSubmitEndorsements is how many agents must independently arrive at
@@ -208,13 +213,20 @@ registry:
     owner: ""
     repo: ""
 
-    # Authentication for the HTTPS git push AND the pull-request API call -
-    # one credential, not two. Set githubApp (recommended) or tokenSecret,
-    # not both. Required only if submitProposalEnabled is true; leave both
-    # empty to run with SubmitProposal disabled.
+    # Authentication for everything this component does against the remote -
+    # one credential, not several: the initial clone of skillsRepo.url into
+    # repoDir, the periodic base-branch fetch, the HTTPS push, and the
+    # pull-request API call. Set githubApp (recommended) or tokenSecret, not
+    # both.
+    #
+    # Leaving both empty runs in propose-only mode (SubmitProposal
+    # disabled), which is viable only against a public repo - a private one
+    # still needs a credential here just to clone and fetch.
     #
     # Whichever is used needs write access here, unlike skillsRepo above:
-    # "Contents: Read and write" plus "Pull requests: Read and write".
+    # "Contents: Read and write" plus "Pull requests: Read and write". It can
+    # be the same GitHub App installation skillsRepo.githubApp uses, if that
+    # app's permissions cover both.
     githubApp:
       # appId is the app's client ID ("Iv23...") or its numeric app ID.
       appId: ""

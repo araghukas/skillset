@@ -25,6 +25,11 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- printf "%s-registry" (include "skillsd.fullname" .) -}}
 {{- end -}}
 
+{{/* Namespace every object in this chart is created in. */}}
+{{- define "skillsd.namespace" -}}
+{{- .Values.namespace | default .Release.Namespace -}}
+{{- end -}}
+
 {{/* Path the GitHub App private key Secret is mounted at, and the key within it. */}}
 {{- define "skillsd.githubAppKeyPath" -}}/etc/github-app/private-key.pem{{- end -}}
 {{- define "skillsd.githubAppKeyName" -}}private-key.pem{{- end -}}

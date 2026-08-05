@@ -1,6 +1,6 @@
 apiVersion: v2
 name: skillsd
-description: gRPC skill registry service, backed by a git-cloned skills repo
+description: A skills and learning API for Agents
 type: application
 version: 0.1.0
 appVersion: "0.1.0"
