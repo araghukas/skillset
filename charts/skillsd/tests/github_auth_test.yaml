@@ -1,0 +1,149 @@
+suite: github auth mode selection
+templates:
+  - deployment.yaml
+  - deployment-registry.yaml
+tests:
+  # --- skillsRepo (init container) ---
+
+  - it: skillsRepo defaults to an unauthenticated clone
+    templates:
+      - deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.initContainers[0].env
+          content:
+            name: GITHUB_AUTH_MODE
+            value: "none"
+      # Only the skills-data emptyDir; no private key volume.
+      - lengthEqual:
+          path: spec.template.spec.volumes
+          count: 1
+
+  - it: skillsRepo tokenSecret selects token mode and wires the secret key
+    templates:
+      - deployment.yaml
+    set:
+      skillsRepo.tokenSecret: skills-token
+    asserts:
+      - contains:
+          path: spec.template.spec.initContainers[0].env
+          content:
+            name: GITHUB_AUTH_MODE
+            value: "token"
+      - contains:
+          path: spec.template.spec.initContainers[0].env
+          content:
+            name: GITHUB_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: skills-token
+                key: token
+      - lengthEqual:
+          path: spec.template.spec.volumes
+          count: 1
+
+  - it: skillsRepo githubApp mounts the private key and sets its path
+    templates:
+      - deployment.yaml
+    set:
+      skillsRepo.githubApp.appId: Iv23test
+      skillsRepo.githubApp.installationId: "12345"
+      skillsRepo.githubApp.privateKeySecret: skills-app-key
+    asserts:
+      - contains:
+          path: spec.template.spec.initContainers[0].env
+          content:
+            name: GITHUB_AUTH_MODE
+            value: "githubApp"
+      - contains:
+          path: spec.template.spec.initContainers[0].env
+          content:
+            name: GITHUB_APP_PRIVATE_KEY_PATH
+            value: /etc/github-app/private-key.pem
+      # appId/installationId are quoted, so a numeric app id stays a string.
+      - contains:
+          path: spec.template.spec.initContainers[0].env
+          content:
+            name: GITHUB_APP_INSTALLATION_ID
+            value: "12345"
+      - equal:
+          path: spec.template.spec.volumes[1].name
+          value: github-app-key
+      - equal:
+          path: spec.template.spec.volumes[1].secret.secretName
+          value: skills-app-key
+      # The env var path must sit inside the directory actually mounted.
+      - equal:
+          path: spec.template.spec.initContainers[0].volumeMounts[1].mountPath
+          value: /etc/github-app
+      - equal:
+          path: spec.template.spec.initContainers[0].volumeMounts[1].readOnly
+          value: true
+      - notContains:
+          path: spec.template.spec.initContainers[0].env
+          content:
+            name: GITHUB_TOKEN
+
+  # --- registry.github (main container) ---
+
+  - it: registry defaults to no credential, leaving submit propose-only
+    templates:
+      - deployment-registry.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GITHUB_AUTH_MODE
+            value: "none"
+
+  - it: registry githubApp mounts its own key volume
+    templates:
+      - deployment-registry.yaml
+    set:
+      registry.github.githubApp.appId: Iv23reg
+      registry.github.githubApp.installationId: "67890"
+      registry.github.githubApp.privateKeySecret: registry-app-key
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GITHUB_AUTH_MODE
+            value: "githubApp"
+      - equal:
+          path: spec.template.spec.volumes[0].name
+          value: github-app-key
+      - equal:
+          path: spec.template.spec.volumes[0].secret.secretName
+          value: registry-app-key
+
+  # --- misconfiguration must fail the render, not deploy something broken ---
+
+  - it: rejects tokenSecret and githubApp set together
+    templates:
+      - deployment.yaml
+    set:
+      skillsRepo.tokenSecret: skills-token
+      skillsRepo.githubApp.appId: Iv23test
+      skillsRepo.githubApp.installationId: "12345"
+      skillsRepo.githubApp.privateKeySecret: skills-app-key
+    asserts:
+      - failedTemplate:
+          errorPattern: "skillsRepo: set either tokenSecret or githubApp, not both"
+
+  - it: rejects a partially configured githubApp
+    templates:
+      - deployment.yaml
+    set:
+      skillsRepo.githubApp.appId: Iv23test
+    asserts:
+      - failedTemplate:
+          errorPattern: "skillsRepo.githubApp is incomplete"
+
+  - it: names the registry section in its own error message
+    templates:
+      - deployment-registry.yaml
+    set:
+      registry.github.githubApp.privateKeySecret: registry-app-key
+    asserts:
+      - failedTemplate:
+          errorPattern: "registry.github.githubApp is incomplete"

@@ -1,0 +1,80 @@
+suite: chart fundamentals
+tests:
+  - it: honours an explicit namespace override
+    templates:
+      - deployment.yaml
+      - deployment-registry.yaml
+      - pvc-evidence.yaml
+    set:
+      namespace: skills-system
+    asserts:
+      - equal:
+          path: metadata.namespace
+          value: skills-system
+
+  - it: drops the whole registry when disabled
+    templates:
+      - deployment-registry.yaml
+      - service-registry.yaml
+      - pvc-registry.yaml
+      - pvc-evidence.yaml
+    set:
+      registry.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: converts MiB values to bytes for the gRPC limits
+    templates:
+      - deployment.yaml
+    set:
+      grpcMaxRecvMsgSizeMiB: 8
+      grpcMaxSendMsgSizeMiB: 16
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GRPC_MAX_RECV_MSG_SIZE_BYTES
+            value: "8388608"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GRPC_MAX_SEND_MSG_SIZE_BYTES
+            value: "16777216"
+
+  # skillsd's volume, written by the init container, and must be read-only
+  - it: mounts the skills volume read-only in the serving container
+    templates:
+      - deployment.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].volumeMounts[0].readOnly
+          value: true
+      - notExists:
+          path: spec.template.spec.initContainers[0].volumeMounts[0].readOnly
+
+  - it: falls back to an emptyDir when evidence persistence is off
+    templates:
+      - deployment-registry.yaml
+    set:
+      registry.evidence.persistence.enabled: false
+    asserts:
+      - equal:
+          path: spec.template.spec.volumes[1].name
+          value: evidence-data
+      - exists:
+          path: spec.template.spec.volumes[1].emptyDir
+      - notExists:
+          path: spec.template.spec.volumes[1].persistentVolumeClaim
+
+  - it: mounts the evidence volume at the directory holding the db file
+    templates:
+      - deployment-registry.yaml
+    set:
+      registry.evidence.dbPath: /var/lib/custom/evidence.db
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: evidence-data
+            mountPath: /var/lib/custom

@@ -3,6 +3,7 @@ IMG_REPO      := localhost:5005/skillsd
 IMG_TAG       := dev
 IMG           := $(IMG_REPO):$(IMG_TAG)
 CHART         := charts/skillsd
+HELM_UNITTEST_VERSION := 1.1.2
 RELEASE       := skillsd
 KIND_CONTEXT  := kind-skillsd
 CLUSTER_CFG   := local/cluster.yaml
@@ -87,6 +88,18 @@ helm-lint: ## Lint the skillsd chart
 .PHONY: helm-template
 helm-template: ## Render the skillsd chart with local values
 	helm template $(RELEASE) $(CHART) -f $(VALUES)
+
+.PHONY: print-helm-unittest-version
+print-helm-unittest-version: ## Print the pinned helm-unittest plugin version (used by CI)
+	@echo $(HELM_UNITTEST_VERSION)
+
+.PHONY: helm-test
+helm-test: ## Run the chart unit tests (needs the helm-unittest plugin)
+	@helm plugin list | grep -q '^unittest' || { \
+		echo "missing helm plugin: helm plugin install https://github.com/helm-unittest/helm-unittest --version $(HELM_UNITTEST_VERSION) --verify=false"; \
+		exit 1; \
+	}
+	helm unittest $(CHART)
 
 ## --- Dev loop ---
 
