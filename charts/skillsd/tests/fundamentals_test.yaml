@@ -1,5 +1,36 @@
 suite: chart fundamentals
 tests:
+  # A released chart is packaged with --app-version set from the git tag, so
+  # an unset image.tag must resolve to it. Getting this wrong ships a chart
+  # that pulls the wrong image, or ":".
+  - it: defaults the image tag to the chart appVersion
+    templates:
+      - deployment.yaml
+      - deployment-registry.yaml
+    chart:
+      appVersion: 1.2.3
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: ghcr.io/araghukas/skillsd:1.2.3
+      - equal:
+          path: spec.template.spec.initContainers[0].image
+          value: ghcr.io/araghukas/skillsd:1.2.3
+        template: deployment.yaml
+
+  - it: lets an explicit image tag win over appVersion
+    templates:
+      - deployment.yaml
+    chart:
+      appVersion: 1.2.3
+    set:
+      image.repository: localhost:5005/skillsd
+      image.tag: dev
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: localhost:5005/skillsd:dev
+
   - it: honours an explicit namespace override
     templates:
       - deployment.yaml

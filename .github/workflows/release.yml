@@ -1,0 +1,100 @@
+name: Release
+
+# Merges to main publish a SHA-tagged image so main is always deployable.
+# Pushing a v* tag additionally publishes the versioned image and the Helm
+# chart, whose version is taken from the tag rather than from Chart.yaml.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/skillsd
+  CHART_REPO: oci://ghcr.io/${{ github.repository_owner }}/charts
+
+jobs:
+  image:
+    name: Image
+    runs-on: ubuntu-latest
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          # sha-<short> is the immutable one worth deploying; :main and
+          # :latest are conveniences that move.
+          tags: |
+            type=sha,prefix=sha-,format=short
+            type=raw,value=main,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  chart:
+    name: Chart
+    # Charts are versioned artifacts: publishing only on tags keeps a given
+    # chart version immutable, which is what Helm's dependency resolution
+    # assumes. Merges to main deliberately publish no chart.
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v4.2.3
+
+      - name: Log in to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" \
+            | helm registry login ghcr.io -u '${{ github.actor }}' --password-stdin
+
+      # The tag is the single source of truth for both versions, so the chart
+      # and the image it defaults to can never disagree. Chart.yaml's 0.1.0
+      # is only a placeholder for unreleased local work.
+      - name: Package chart
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          echo "packaging skillsd chart at $version"
+          helm package charts/skillsd \
+            --version "$version" \
+            --app-version "$version" \
+            --destination dist/
+
+      - name: Push chart
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          helm push "dist/skillsd-${version}.tgz" "${CHART_REPO}"

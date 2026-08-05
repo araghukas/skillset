@@ -3,8 +3,10 @@ namespace: ""
 replicaCount: 2
 
 image:
-  repository: skillsd
-  tag: latest
+  repository: ghcr.io/araghukas/skillsd
+  # tag defaults to the chart's appVersion, so a released chart pulls the
+  # image built from the same tag. Override for a local or pinned build.
+  tag: ""
   pullPolicy: IfNotPresent
 
 grpcAddr: ":8080"
@@ -83,8 +85,10 @@ registry:
   enabled: true
 
   image:
-    repository: skillsd
-    tag: latest
+    repository: ghcr.io/araghukas/skillsd
+    # Same image as skillsd above, run with a different entrypoint; tag
+    # likewise defaults to the chart's appVersion.
+    tag: ""
     pullPolicy: IfNotPresent
 
   # grpcAddr is passed through as GRPC_ADDR; service.port must match its
