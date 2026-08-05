@@ -1,9 +1,8 @@
-**`skillset` is an API for agents, not humans.** There's no client SDK, no REST
-wrapper, and it isn't meant to be hand-integrated. Agents connect, discover
-services, and call RPCs on their own.
+`skillset` is an API for agents, not humans.
 
-If you're a human standing this up, see
-[docs/quickstart.md](docs/quickstart.md).
+Agents connect, discover services, and call RPCs on their own.
+
+If you're a human standing this up, see [docs/quickstart.md](docs/quickstart.md).
 
 ## Why this exists
 
@@ -15,10 +14,10 @@ actually improves: it serves the current skill set to every agent, collects
 independent proposals when agents find something wrong, and collapses agreement
 into pull requests instead of noise.
 
-Git remains the durable store underneath; human reviewers stay in charge of
+Git remains the durable store underneath, while human reviewers stay in charge of
 merging any proposal into that permanent record.
 
-`skillset` does what git alone can not:
+`skillset` does what git alone cannot:
 
 - **It knows whether a skill worked.** A pull request saying *"an agent wants to
   change this"* tells a reviewer little. One saying *"this version was cited by
@@ -36,8 +35,6 @@ merging any proposal into that permanent record.
 **No part of `skillset` itself runs an AI model, and none is planned.**
 
 ## Workloads
-
-One chart, two Deployments:
 
 | Workload | Role | Scale | Does |
 |---|---|---|---|
@@ -62,8 +59,8 @@ flowchart TB
   Agent -- "EvidenceService\n(report, query signals)" --> Write
 
   GitHub -- "clone, read-only" --> Read
-  GitHub -- "fetch base branch" --> Write
-  Write -- "push branch / open PR" --> GitHub
+  GitHub -- "fetch base" --> Write
+  Write -- "push branch" --> GitHub
 ```
 
 Both workloads ship in one Helm chart ([charts/skillsd](charts/skillsd)) but
@@ -76,16 +73,13 @@ volume.
 | Doc | Covers |
 |---|---|
 | [docs/quickstart.md](docs/quickstart.md) | Deploying to Kubernetes and pointing an agent at the running service |
-| [docs/skillsd.md](docs/skillsd.md) | The read fleet — how it loads and serves skills, and why there's no runtime refresh |
+| [docs/skillsd.md](docs/skillsd.md) | The read fleet, how it loads and serves skills |
 | [docs/skillsd-registry.md](docs/skillsd-registry.md) | Proposals, consolidation, pull requests, and outcome reporting |
 | [docs/data-stores.md](docs/data-stores.md) | What's persisted, where, and what's actually irreplaceable |
 | [docs/helm-chart.md](docs/helm-chart.md) | Chart structure, full values reference, GitHub auth, installation |
 
 Everything above is written for an operator. The agent-facing API reference is
-`GetClientGuide` itself (see [internal/clientguide](internal/clientguide)).
-
-RPC definitions live in [proto/skills/v1](proto/skills/v1); implementations in
-[internal/](internal/).
+the `GetClientGuide` RPC itself (see [internal/clientguide](internal/clientguide)).
 
 ## Local development
 
@@ -96,18 +90,22 @@ build/deploy/live-reload.
 make dev
 ```
 
-That's the whole default path — no GitHub account or repo needed. `make dev`
-bootstraps a throwaway Gitea instance in the cluster (via `gitea-up`, a
-prerequisite it runs for you) and points both components at it, so the full
-read + propose + submit-PR path works offline.
+The default requires no GitHub account: `make dev` bootstraps a throwaway
+Gitea instance in the cluster (via `gitea-up`) and points both components at
+it, so the full read + propose + submit-PR path works offline.
 
-To run against a real GitHub repo instead, create `local/github-app.json`
-first. `make dev` then skips Gitea entirely and switches both components to
-GitHub App auth.
+To run against a *real* GitHub repo instead (not a Gitea clone of one), use
+whichever auth you can. Both modes skip the Gitea bootstrap, since `gitea-up`
+deletes token files that don't authenticate against Gitea:
 
-See [local/README.md](local/README.md) for either path in full — registering
-the app, seeding a different skills repo, teardown, and talking to the running
-deployment.
+```bash
+make dev GITEA=0   # token auth: fine-grained PATs in local/git-skillsd-*token
+make dev           # GitHub App auth: auto-detected from local/github-app.json
+```
+
+See [local/README.md](local/README.md) for complete auth options, as well as
+registering the app, seeding a different skills repo, teardown, and talking
+to the running deployment.
 
 ## License
 
