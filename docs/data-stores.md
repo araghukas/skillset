@@ -6,7 +6,7 @@ lose data that can't be recovered.
 
 ```mermaid
 flowchart LR
-  GH[("GitHub\nremote skills repo")]
+  GH[("Git forge\nremote skills repo")]
 
   subgraph Pod1["skillsd pod (× N replicas)"]
     SV1[("skills-data\nemptyDir")]
@@ -51,7 +51,7 @@ repository: the base branch (re-fetched from origin every `fetchInterval`,
 default 5 minutes) plus every open proposal branch it has committed to locally.
 
 **Caveat:** most of this volume is a cache — the base branch is trivially
-re-cloned. But a proposal branch is only pushed to GitHub when `SubmitProposal`
+re-cloned. But a proposal branch is only pushed upstream when `SubmitProposal`
 is called; until then, it exists **only** in this volume. Deleting `repo-data`
 before an agent submits its proposal loses that proposal, not just a cache of
 it. In practice this is rarely worth backing up on its own merits (an agent can

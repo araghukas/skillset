@@ -2,7 +2,7 @@
 
 `skillsd-registry` is an optional, single-replica component that gives agents a
 write path onto skills — proposing changes, opening pull requests, and reporting
-how a skill actually performed — without ever handing them raw git or GitHub
+how a skill actually performed — without ever handing them raw git or forge
 credentials. It owns a real git working copy and (optionally) a SQLite database,
 both on their own persistent volumes.
 
@@ -24,18 +24,24 @@ It serves two independent gRPC services on one endpoint: `ProposalService` and
 | `ListProposalClusters` | Groups a skill's open proposals into clusters of competing answers to the same defect, most-contested first. |
 | `GetProposal` | Fetches one proposal by branch name: its diff against base, commit history, and endorsements. |
 | `GetSkillAtRef` | Fetches a skill's metadata as of an arbitrary ref — a branch or a commit SHA. |
-| `SubmitProposal` | Pushes the branch upstream and opens a GitHub pull request for human review. |
+| `SubmitProposal` | Pushes the branch upstream and opens a pull request for human review. |
 
 Branches are namespaced `proposals/<agent_id>/<skill_name>/<proposal_id>` —
 that's also the lookup key for `ListProposals`. There's no separate status field
 or database row for a proposal: its state *is* whatever's on its branch, and
-once `SubmitProposal` opens a PR, GitHub's own merge mechanism takes over.
+once `SubmitProposal` opens a PR, the forge's own merge mechanism takes over.
 Agents send full file content rather than a patch, so the server computes the
 diff itself and callers never need a base they may not have in sync.
 
 Deploying it requires an HTTPS clone URL with push access and a write-capable
 credential (GitHub App installation or token). See
 [helm-chart.md](helm-chart.md#github-authentication).
+
+Pull requests are opened through the GitHub REST API against
+`registry.github.apiBaseURL`, so the forge must be GitHub or GitHub-API
+compatible — GitHub Enterprise and Gitea both are. Everything else on the write
+path is plain git over HTTPS. GitHub App auth is GitHub-only; forges without it
+use token auth.
 
 ### Consolidation: how N agents produce one pull request
 
@@ -109,7 +115,7 @@ sequenceDiagram
     participant A2 as Agent 2
     participant A3 as Agent 3
     participant Reg as skillsd-registry
-    participant GH as GitHub
+    participant GH as Git forge
 
     A1->>Reg: ProposeChange(fix X)
     Reg-->>A1: deduplicated: false, corroboration: 1

@@ -39,7 +39,7 @@ merging any proposal into that permanent record.
 | Workload | Role | Scale | Does |
 |---|---|---|---|
 | `skillsd` | Read path | N replicas, stateless | Serves the current skill set over gRPC, every skill attributed to the commit it came from |
-| `skillsd-registry` | Write path (optional) | 1 replica, stateful | Turns agent proposals into git commits, deduplicates and clusters competing fixes, opens GitHub pull requests for human review |
+| `skillsd-registry` | Write path (optional) | 1 replica, stateful | Turns agent proposals into git commits, deduplicates and clusters competing fixes, opens pull requests on the git forge for human review |
 
 ## Architecture
 
@@ -52,15 +52,15 @@ flowchart TB
     Write["skillsd-registry\nwrite path, 1 replica\nProposalService + EvidenceService"]
   end
 
-  GitHub[("GitHub\nskills repo · pull requests")]
+  Forge[("Git forge\nGitHub, Gitea, …\nskills repo · pull requests")]
 
   Agent -- "SkillService\n(discover, read)" --> Read
   Agent -- "ProposalService\n(propose, submit)" --> Write
   Agent -- "EvidenceService\n(report, query signals)" --> Write
 
-  GitHub -- "clone, read-only" --> Read
-  GitHub -- "fetch base" --> Write
-  Write -- "push branch" --> GitHub
+  Forge -- "clone, read-only" --> Read
+  Forge -- "fetch base" --> Write
+  Write -- "push branch" --> Forge
 ```
 
 Both workloads ship in one Helm chart ([charts/skillsd](charts/skillsd)) but

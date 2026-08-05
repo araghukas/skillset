@@ -24,7 +24,7 @@ sequenceDiagram
     participant Init as init container<br/>(skillsd-init)
     participant Vol as skills-data<br/>(emptyDir)
     participant Main as skillsd
-    participant GH as GitHub
+    participant GH as Git forge
 
     Init->>GH: authenticate, then<br/>git clone --depth 1 --branch main
     GH-->>Init: shallow clone
