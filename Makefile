@@ -16,6 +16,19 @@ GITEA_SEED_REF ?= main
 export GITEA_SEED_URL
 export GITEA_SEED_REF
 
+# Whether `make dev` bootstraps the local Gitea stand-in. Defaults to off when
+# local/github-app.json exists (GitHub App auth against a real repo - see the
+# Tiltfile). Pass GITEA=0 for the third mode, token auth against a real repo:
+# gitea-init.sh deletes token files that don't authenticate against Gitea, so
+# it must not run when local/git-skillsd-*token hold real GitHub tokens.
+GITHUB_APP_JSON := local/github-app.json
+GITEA ?= $(if $(wildcard $(GITHUB_APP_JSON)),0,1)
+ifeq ($(GITEA),1)
+DEV_PREREQS := check-prereqs cluster-up gitea-up
+else
+DEV_PREREQS := check-prereqs cluster-up
+endif
+
 .PHONY: help
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
@@ -84,7 +97,7 @@ check-prereqs: ## Verify required local tools are installed
 	done
 
 .PHONY: dev
-dev: check-prereqs cluster-up gitea-up ## Start the local cluster (if needed), bootstrap Gitea, and start the Tilt dev loop
+dev: $(DEV_PREREQS) ## Start the local cluster, bootstrap Gitea (unless local/github-app.json exists or GITEA=0), and start the Tilt dev loop
 	tilt up --debug --stream
 
 .PHONY: dev-down

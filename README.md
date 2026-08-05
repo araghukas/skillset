@@ -90,32 +90,24 @@ RPC definitions live in [proto/skills/v1](proto/skills/v1); implementations in
 ## Local development
 
 Local dev runs on a `kind` cluster provisioned by `ctlptl`, with Tilt handling
-build/deploy/live-reload. Requires `go`, `docker`, `kind`, `ctlptl`, `kubectl`,
-`helm`, `tilt`, and `buf` on `PATH`.
+build/deploy/live-reload.
 
 ```bash
-make dev             # cluster-up, bootstrap a local Gitea stand-in for GitHub, then tilt up
-make dev-down        # tilt down, keeping the cluster (and the local Gitea) up
-make cluster-down    # tear down the cluster entirely
-make verify          # run the gRPC check scripts in local/verify/ against the running deployment
-make help            # full target list: build, test, vet, proto codegen, docker build, helm lint/template, log tailing, ...
+make dev
 ```
 
-`make dev` needs no GitHub account or repo: it stands up a throwaway Gitea
-instance in the cluster and points both `skillsd` and `skillsd-registry` at it,
-so the full read + propose + submit-PR path works entirely offline.
+That's the whole default path — no GitHub account or repo needed. `make dev`
+bootstraps a throwaway Gitea instance in the cluster (via `gitea-up`, a
+prerequisite it runs for you) and points both components at it, so the full
+read + propose + submit-PR path works offline.
 
-See [local/README.md](local/README.md).
+To run against a real GitHub repo instead, create `local/github-app.json`
+first. `make dev` then skips Gitea entirely and switches both components to
+GitHub App auth.
 
-## Known limitations
-
-This is a work in progress. The following are known limitations:
-
-- **GitHub auth needs work:** PAT-based auth is rate-limited. `skillset` doesn't
-  hit the GitHub API often today, but that could become a problem at scale.
-- **Write-path bottleneck:** `skillsd-registry` is a singleton with its own
-  volume, which is the simplest way to serialize writes, but represents a
-  scaling limit down the line.
+See [local/README.md](local/README.md) for either path in full — registering
+the app, seeding a different skills repo, teardown, and talking to the running
+deployment.
 
 ## License
 
