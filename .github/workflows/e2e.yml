@@ -1,0 +1,96 @@
+name: E2E
+
+# Builds the image, deploys it to a throwaway kind cluster the same way
+# `make dev` does (Gitea stand-in mode), and runs `make verify` against it.
+# Uses `tilt ci` instead of `tilt up` since this needs to exit once
+# everything's healthy rather than stream forever.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  KIND_CONTEXT: kind-skillsd
+
+jobs:
+  e2e:
+    name: Local deploy (Gitea) and verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # go install below needs this on PATH for later steps.
+      - name: Add Go bin to PATH
+        run: echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v4.2.3
+
+      - uses: azure/setup-kubectl@v4
+
+      # install_only: true because ctlptl (via `make cluster-up`) creates the
+      # actual cluster - this step just puts the kind binary on PATH.
+      - uses: helm/kind-action@v1
+        with:
+          install_only: true
+
+      - name: Install ctlptl, tilt, grpcurl
+        run: |
+          go install github.com/tilt-dev/ctlptl/cmd/ctlptl@latest
+          go install github.com/fullstorydev/grpcurl/cmd/grpcurl@latest
+          curl -fsSL https://raw.githubusercontent.com/tilt-dev/tilt/master/scripts/install.sh | bash
+
+      - name: Cluster up + Gitea bootstrap
+        run: |
+          make check-prereqs
+          make cluster-up
+          make gitea-up
+
+      - name: Build and deploy
+        run: tilt ci
+
+      # Tilt's own port-forwards die with the `tilt ci` process, so re-forward
+      - name: Port-forward skillsd + skillsd-registry
+        run: |
+          kubectl --context "$KIND_CONTEXT" port-forward svc/skillsd 8080:8080 >/tmp/pf-skillsd.log 2>&1 &
+          kubectl --context "$KIND_CONTEXT" port-forward svc/skillsd-registry 8081:8081 >/tmp/pf-registry.log 2>&1 &
+
+          for i in $(seq 1 30); do
+            if grpcurl -plaintext -connect-timeout 2 localhost:8080 list >/dev/null 2>&1 \
+              && grpcurl -plaintext -connect-timeout 2 localhost:8081 list >/dev/null 2>&1; then
+              echo "both port-forwards are up"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "port-forwards never came up"
+          cat /tmp/pf-skillsd.log /tmp/pf-registry.log
+          exit 1
+
+      - name: Verify
+        run: make verify
+
+      - name: Dump cluster state
+        if: failure()
+        run: |
+          kubectl --context "$KIND_CONTEXT" get pods -A
+          kubectl --context "$KIND_CONTEXT" describe pods -l app.kubernetes.io/instance=skillsd
+          kubectl --context "$KIND_CONTEXT" logs -l app.kubernetes.io/instance=skillsd --all-containers --tail=200
+
+      - name: Tear down cluster
+        if: always()
+        run: make cluster-down
