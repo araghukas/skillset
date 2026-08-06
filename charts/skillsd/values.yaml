@@ -73,6 +73,17 @@ mountPath: /skills
 
 resources: {}
 
+# podSecurityContext applies to every pod in the chart. fsGroup matters when
+# githubApp auth is configured: the private key secret volume is owned by
+# root:fsGroup, never by the container's user, so without a matching fsGroup
+# the image's non-root user (uid/gid 65532, distroless nonroot) cannot read
+# it. Override runAsUser/runAsGroup/fsGroup if you build from another base.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+
 # registry configures the skillsd-registry component: a single-replica,
 # persistent write path that lets AI agents propose changes to skills as git
 # commits and submit them as GitHub pull requests for human review, and that

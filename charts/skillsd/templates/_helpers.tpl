@@ -80,7 +80,7 @@ none
 - name: github-app-key
   secret:
     secretName: {{ .auth.githubApp.privateKeySecret }}
-    defaultMode: 0400
+    defaultMode: 0440
     items:
       - key: {{ include "skillsd.githubAppKeyName" . }}
         path: {{ include "skillsd.githubAppKeyName" . }}

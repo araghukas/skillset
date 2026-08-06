@@ -72,6 +72,15 @@ tests:
       - equal:
           path: spec.template.spec.volumes[1].secret.secretName
           value: skills-app-key
+      # The key file is group-readable and the pod's fsGroup owns it: secret
+      # volumes are never owned by the container's user, so owner-only bits
+      # would make the key unreadable to the non-root image user.
+      - equal:
+          path: spec.template.spec.volumes[1].secret.defaultMode
+          value: 0440
+      - equal:
+          path: spec.template.spec.securityContext.fsGroup
+          value: 65532
       # The env var path must sit inside the directory actually mounted.
       - equal:
           path: spec.template.spec.initContainers[0].volumeMounts[1].mountPath

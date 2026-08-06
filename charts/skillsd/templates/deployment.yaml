@@ -23,6 +23,10 @@ spec:
     spec:
       serviceAccountName: {{ include "skillsd.serviceAccountName" . }}
       terminationGracePeriodSeconds: 30
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- $auth := dict "auth" .Values.skillsRepo "label" "skillsRepo" }}
       volumes:
         - name: skills-data

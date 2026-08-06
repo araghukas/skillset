@@ -160,6 +160,7 @@ For local dev, the Tiltfile creates them for you from gitignored files; see
 | `skillsRepo.apiBaseURL` | `""` | `GITHUB_API_BASE_URL` | Token-exchange host, for GitHub Enterprise |
 | `mountPath` | `/skills` | `SKILLS_DIR` | Where the volume is mounted in both containers |
 | `resources` | `{}` | — | Pod resource requests/limits |
+| `podSecurityContext` | uid/gid `65532`, `fsGroup: 65532` | — | Applied to every pod. `fsGroup` must match the image's user, or the mounted GitHub App key is unreadable |
 
 ## `skillsd-registry` values
 
