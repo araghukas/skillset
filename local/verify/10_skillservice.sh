@@ -27,6 +27,8 @@ check "returned skill name matches" "$skill" ".skill.name == \"$SKILL_NAME\""
 check "returned skill has a non-empty description" "$skill" '(.skill.description // "") | length > 0'
 check "returned skill has a commit SHA" "$skill" '(.skill.commit // "") | length > 0'
 check "returned skill has SKILL.md among context files" "$skill" '.skill.contextFiles // [] | map(.filePath) | index("SKILL.md") != null'
+check "SKILL.md content carries the onboarding footer" "$skill" \
+  '.skill.contextFiles // [] | map(select(.filePath == "SKILL.md")) | first | .content | contains("served by skillsd")'
 
 # Negative case: a name that isn't in the index should error, not return empty.
 echo "== SkillService.GetSkill (unknown skill) =="
@@ -41,5 +43,7 @@ echo "== SkillService.GetClientGuide =="
 guide="$(rpc "$SKILLSD_ADDR" skills.v1.SkillService/GetClientGuide)"
 check "client guide has non-empty content" "$guide" '(.skill.contextFiles // []) | map(.content) | join("") | length > 0'
 check "client guide is not returned by ListSkills" "$list" '(.skills // []) | map(.name) | index("skillsd-client") == null'
+check "client guide is not double-stamped with the served-skill onboarding footer" "$guide" \
+  '(.skill.contextFiles // []) | map(.content) | join("") | contains("served by skillsd") | not'
 
 summarize

@@ -4,8 +4,10 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	skillsv1 "github.com/araghukas/skillset/gen/skills/v1"
 	"github.com/araghukas/skillset/internal/skillparse"
 	"github.com/araghukas/skillset/internal/storage"
 )
@@ -132,6 +134,53 @@ func TestLoadSkipsNonUTF8ContextFiles(t *testing.T) {
 		if p == "assets/logo.png" {
 			t.Fatalf("expected binary asset to be skipped, but found it in context files: %v", paths)
 		}
+	}
+}
+
+// TestLoadAppendsOnboardingFooterToSkillMd is a regression test for the
+// self-onboarding footer: every served skill's SKILL.md content should
+// carry a short note pointing agents at the proposal workflow, even when
+// the installer's own system prompt says nothing about skillsd.
+func TestLoadAppendsOnboardingFooterToSkillMd(t *testing.T) {
+	root := t.TempDir()
+	writeSkill(t, root, "frontend-design", "---\nname: frontend-design\ndescription: test desc\n---\nbody\n")
+	writeSkillFile(t, root, "frontend-design", "references/notes.txt", []byte("supporting notes"))
+
+	reg := New(storage.NewFSBackend(root), "", "")
+	if _, err := reg.Load(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	sk, ok := reg.Get("frontend-design")
+	if !ok {
+		t.Fatal("expected to find frontend-design skill")
+	}
+
+	var skillMD, notes *skillsv1.SkillContextFile
+	for _, cf := range sk.Metadata.ContextFiles {
+		switch cf.FilePath {
+		case skillparse.SkillFileName:
+			skillMD = cf
+		case "references/notes.txt":
+			notes = cf
+		}
+	}
+
+	if skillMD == nil {
+		t.Fatal("expected a SKILL.md context file")
+	}
+	if !strings.Contains(skillMD.Content, "ProposeChange") {
+		t.Fatalf("expected SKILL.md content to carry the onboarding footer, got: %q", skillMD.Content)
+	}
+	if !strings.HasPrefix(skillMD.Content, "---\nname: frontend-design") {
+		t.Fatalf("expected original SKILL.md content to be preserved before the footer, got: %q", skillMD.Content)
+	}
+
+	if notes == nil {
+		t.Fatal("expected a references/notes.txt context file")
+	}
+	if strings.Contains(notes.Content, "ProposeChange") {
+		t.Fatalf("expected the onboarding footer to be appended only to SKILL.md, not to supporting files, got: %q", notes.Content)
 	}
 }
 

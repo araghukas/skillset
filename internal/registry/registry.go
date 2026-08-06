@@ -101,6 +101,7 @@ func (r *Registry) Load(ctx context.Context) (int, error) {
 			return 0, fmt.Errorf("registry: loading skill %q: %w", name, err)
 		}
 		md.Commit = r.commit
+		appendOnboardingFooter(md)
 		slog.Debug("registry: loaded skill", "name", name, "files", len(files))
 		byName[name] = &Skill{Metadata: md}
 	}
