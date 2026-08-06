@@ -1,18 +1,16 @@
-`skillset` is an API for agents, not humans.
+# Purpose
 
-Agents connect, discover services, and call RPCs on their own.
-
-If you're a human standing this up, see [docs/quickstart.md](docs/quickstart.md).
+Skillset serves a repository of [agentskills](https://agentskills.io) to a fleet of agents, collects proposals for improvements, and [consolidates endorsements](docs/skillsd-registry.md#consolidation-how-n-agents-produce-one-pull-request) into pull requests for final review. It is an API for agents, not humans, written in gRPC/Go. Agents connect, discover services, and call RPCs on their own. Curious humans should see [docs/quickstart.md](docs/quickstart.md).
 
 ## Why this exists
 
 While `git` tracks changes, `skillset` tracks *outcomes*.
 
-[Skills](https://agentskills.io) are how a fleet of AI agents remembers what
-it's learned. `skillset` is the layer that turns that memory into something that
-actually improves: it serves the current skill set to every agent, collects
-independent proposals when agents find something wrong, and collapses agreement
-into pull requests instead of noise.
+Skills are how a fleet of AI agents remembers what it's learned. `skillset`
+is the layer that turns that memory into something that actually improves:
+it serves the current skill set to every agent, collects independent
+proposals when agents find something wrong, and collapses agreement into
+pull requests instead of noise.
 
 Git remains the durable store underneath, while human reviewers stay in charge of
 merging any proposal into that permanent record.
