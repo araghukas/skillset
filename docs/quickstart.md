@@ -140,8 +140,7 @@ to call, when, and with what fields. Do this before assuming any RPC's shape.
 
 Everything past that point is between the agent and `GetClientGuide` — that
 guide (served by the running binary itself, not this repo) is the actual API
-reference. Treat it as authoritative over anything written here if the two ever
-disagree.
+reference.
 
 ## 4. Local development
 
