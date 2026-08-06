@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	skillsv1 "github.com/araghukas/skillset/gen/skills/v1"
+	"github.com/araghukas/skillset/internal/githubauth"
 	"github.com/araghukas/skillset/internal/githubpr"
 	"github.com/araghukas/skillset/internal/gitrepo"
 	"github.com/araghukas/skillset/internal/proposals"
@@ -67,7 +68,7 @@ func newTestServer(t *testing.T) (*Server, *httptest.Server, *http.Request, *[]b
 		t.Fatal(err)
 	}
 
-	repo, err := gitrepo.Open(context.Background(), t.TempDir(), originDir, branch, "")
+	repo, err := gitrepo.Open(context.Background(), t.TempDir(), originDir, branch, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +84,7 @@ func newTestServer(t *testing.T) (*Server, *httptest.Server, *http.Request, *[]b
 	}))
 	t.Cleanup(gh.Close)
 
-	client := githubpr.New(gh.URL, "acme", "skills", "test-token")
+	client := githubpr.New(gh.URL, "acme", "skills", githubauth.Static("test-token"))
 	return New(svc, client, branch, true, 0), gh, lastReq, &lastBody
 }
 
@@ -243,7 +244,7 @@ func TestAutoSubmitFiresOnlyOnceTheThresholdIsReached(t *testing.T) {
 	ctx := context.Background()
 
 	var prCalls int
-	s.github = githubpr.New(countingGitHub(t, &prCalls).URL, "acme", "skills", "test-token")
+	s.github = githubpr.New(countingGitHub(t, &prCalls).URL, "acme", "skills", githubauth.Static("test-token"))
 	s.autoSubmitThreshold = 2
 
 	fixed := validSkillMD("frontend-design", "the corrected description")
@@ -304,7 +305,7 @@ func TestAutoSubmitDisabledByDefault(t *testing.T) {
 	ctx := context.Background()
 
 	var prCalls int
-	s.github = githubpr.New(countingGitHub(t, &prCalls).URL, "acme", "skills", "test-token")
+	s.github = githubpr.New(countingGitHub(t, &prCalls).URL, "acme", "skills", githubauth.Static("test-token"))
 
 	fixed := validSkillMD("frontend-design", "the corrected description")
 	for _, agent := range []string{"agent-1", "agent-2", "agent-3"} {

@@ -3,11 +3,32 @@ IMG_REPO      := localhost:5005/skillsd
 IMG_TAG       := dev
 IMG           := $(IMG_REPO):$(IMG_TAG)
 CHART         := charts/skillsd
+HELM_UNITTEST_VERSION := 1.1.2
 RELEASE       := skillsd
 KIND_CONTEXT  := kind-skillsd
 CLUSTER_CFG   := local/cluster.yaml
 VALUES        := local/values.yaml
 GRPC_PORT     := 8080
+
+# Upstream repo the local Gitea stand-in is seeded from (see local/gitea-init.sh).
+# Override on the command line: make gitea-up GITEA_SEED_URL=https://github.com/me/my-skills.git
+GITEA_SEED_URL ?= https://github.com/anthropics/skills.git
+GITEA_SEED_REF ?= main
+export GITEA_SEED_URL
+export GITEA_SEED_REF
+
+# Whether `make dev` bootstraps the local Gitea stand-in. Defaults to off when
+# local/github-app.json exists (GitHub App auth against a real repo - see the
+# Tiltfile). Pass GITEA=0 for the third mode, token auth against a real repo:
+# gitea-init.sh deletes token files that don't authenticate against Gitea, so
+# it must not run when local/git-skillsd-*token hold real GitHub tokens.
+GITHUB_APP_JSON := local/github-app.json
+GITEA ?= $(if $(wildcard $(GITHUB_APP_JSON)),0,1)
+ifeq ($(GITEA),1)
+DEV_PREREQS := check-prereqs cluster-up gitea-up
+else
+DEV_PREREQS := check-prereqs cluster-up
+endif
 
 .PHONY: help
 help: ## Show this help
@@ -16,9 +37,10 @@ help: ## Show this help
 ## --- Go ---
 
 .PHONY: build
-build: ## Build the skillsd and skillsd-registry binaries into ./bin
+build: ## Build the skillsd, skillsd-registry, and skillsd-init binaries into ./bin
 	go build -o bin/$(APP) ./cmd/skillsd
 	go build -o bin/$(APP)-registry ./cmd/skillsd-registry
+	go build -o bin/$(APP)-init ./cmd/skillsd-init
 
 .PHONY: test
 test: ## Run the test suite
@@ -67,6 +89,18 @@ helm-lint: ## Lint the skillsd chart
 helm-template: ## Render the skillsd chart with local values
 	helm template $(RELEASE) $(CHART) -f $(VALUES)
 
+.PHONY: print-helm-unittest-version
+print-helm-unittest-version: ## Print the pinned helm-unittest plugin version (used by CI)
+	@echo $(HELM_UNITTEST_VERSION)
+
+.PHONY: helm-test
+helm-test: ## Run the chart unit tests (needs the helm-unittest plugin)
+	@helm plugin list | grep -q '^unittest' || { \
+		echo "missing helm plugin: helm plugin install https://github.com/helm-unittest/helm-unittest --version $(HELM_UNITTEST_VERSION) --verify=false"; \
+		exit 1; \
+	}
+	helm unittest $(CHART)
+
 ## --- Dev loop ---
 
 .PHONY: check-prereqs
@@ -76,7 +110,7 @@ check-prereqs: ## Verify required local tools are installed
 	done
 
 .PHONY: dev
-dev: check-prereqs cluster-up gitea-up ## Start the local cluster (if needed), bootstrap Gitea, and start the Tilt dev loop
+dev: $(DEV_PREREQS) ## Start the local cluster, bootstrap Gitea (unless local/github-app.json exists or GITEA=0), and start the Tilt dev loop
 	tilt up --debug --stream
 
 .PHONY: dev-down

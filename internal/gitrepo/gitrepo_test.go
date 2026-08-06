@@ -64,7 +64,7 @@ func newOriginRepo(t *testing.T, files map[string]string) (dir, branch string) {
 func TestOpenClonesIfMissing(t *testing.T) {
 	originDir, branch := newOriginRepo(t, map[string]string{"skills/foo/SKILL.md": "hello"})
 
-	repo, err := Open(context.Background(), t.TempDir(), originDir, branch, "")
+	repo, err := Open(context.Background(), t.TempDir(), originDir, branch, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,10 +77,10 @@ func TestOpenReopensExistingDir(t *testing.T) {
 	originDir, branch := newOriginRepo(t, map[string]string{"skills/foo/SKILL.md": "hello"})
 	dir := t.TempDir()
 
-	if _, err := Open(context.Background(), dir, originDir, branch, ""); err != nil {
+	if _, err := Open(context.Background(), dir, originDir, branch, nil); err != nil {
 		t.Fatal(err)
 	}
-	repo, err := Open(context.Background(), dir, originDir, branch, "")
+	repo, err := Open(context.Background(), dir, originDir, branch, nil)
 	if err != nil {
 		t.Fatalf("expected re-opening an existing clone to succeed, got: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestOpenReopensExistingDir(t *testing.T) {
 
 func TestCommitOnBranchCreatesNewBranch(t *testing.T) {
 	originDir, branch := newOriginRepo(t, map[string]string{"skills/foo/SKILL.md": "hello"})
-	repo, err := Open(context.Background(), t.TempDir(), originDir, branch, "")
+	repo, err := Open(context.Background(), t.TempDir(), originDir, branch, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +127,7 @@ func TestCommitOnBranchCreatesNewBranch(t *testing.T) {
 
 func TestCommitOnBranchAppendsToExistingBranch(t *testing.T) {
 	originDir, branch := newOriginRepo(t, map[string]string{"skills/foo/SKILL.md": "hello"})
-	repo, err := Open(context.Background(), t.TempDir(), originDir, branch, "")
+	repo, err := Open(context.Background(), t.TempDir(), originDir, branch, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +162,7 @@ func TestCommitOnBranchAppendsToExistingBranch(t *testing.T) {
 
 func TestMergeBaseFindsOriginalForkPoint(t *testing.T) {
 	originDir, branch := newOriginRepo(t, map[string]string{"skills/foo/SKILL.md": "hello"})
-	repo, err := Open(context.Background(), t.TempDir(), originDir, branch, "")
+	repo, err := Open(context.Background(), t.TempDir(), originDir, branch, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,7 +196,7 @@ func TestMergeBaseFindsOriginalForkPoint(t *testing.T) {
 
 func TestDiff(t *testing.T) {
 	originDir, branch := newOriginRepo(t, map[string]string{"skills/foo/SKILL.md": "hello"})
-	repo, err := Open(context.Background(), t.TempDir(), originDir, branch, "")
+	repo, err := Open(context.Background(), t.TempDir(), originDir, branch, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +222,7 @@ func TestDiff(t *testing.T) {
 
 func TestPush(t *testing.T) {
 	originDir, branch := newOriginRepo(t, map[string]string{"skills/foo/SKILL.md": "hello"})
-	repo, err := Open(context.Background(), t.TempDir(), originDir, branch, "")
+	repo, err := Open(context.Background(), t.TempDir(), originDir, branch, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,7 +252,7 @@ func TestPush(t *testing.T) {
 
 func TestBranchesWithPrefix(t *testing.T) {
 	originDir, branch := newOriginRepo(t, map[string]string{"skills/foo/SKILL.md": "hello"})
-	repo, err := Open(context.Background(), t.TempDir(), originDir, branch, "")
+	repo, err := Open(context.Background(), t.TempDir(), originDir, branch, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -279,7 +279,7 @@ func TestBranchesWithPrefix(t *testing.T) {
 
 func TestResolveRefBySHAAndByBranch(t *testing.T) {
 	originDir, branch := newOriginRepo(t, map[string]string{"skills/foo/SKILL.md": "hello"})
-	repo, err := Open(context.Background(), t.TempDir(), originDir, branch, "")
+	repo, err := Open(context.Background(), t.TempDir(), originDir, branch, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -2,6 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ include "skillsd.fullname" . }}
+  namespace: {{ include "skillsd.namespace" . }}
   labels:
     {{- include "skillsd.labels" . | nindent 4 }}
 spec:
@@ -22,41 +23,44 @@ spec:
     spec:
       serviceAccountName: {{ include "skillsd.serviceAccountName" . }}
       terminationGracePeriodSeconds: 30
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- $auth := dict "auth" .Values.skillsRepo "label" "skillsRepo" }}
       volumes:
         - name: skills-data
           emptyDir: {}
+        {{- with include "skillsd.githubAuthVolume" $auth | trim }}{{- . | nindent 8 }}{{- end }}
       initContainers:
+        # Runs the skillsd image rather than a git image: GitHub App auth has
+        # to sign a JWT and exchange it for a token before it can clone, and
+        # doing that in shell is not worth it. See cmd/skillsd-init.
         - name: skills-clone
-          image: {{ .Values.skillsRepo.cloneImage }}
-          command: ["sh", "-c"]
-          args:
-            - |
-              set -eu
-              CLONE_URL="$GIT_URL"
-              {{- if .Values.skillsRepo.tokenSecret }}
-              CLONE_URL="${GIT_URL%%://*}://x-access-token:${GIT_TOKEN}@${GIT_URL#*://}"
-              {{- end }}
-              git clone --depth 1 --branch "$GIT_BRANCH" "$CLONE_URL" "$SKILLS_DIR"
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/skillsd-init"]
           env:
-            - name: GIT_URL
+            - name: SKILLS_REPO_URL
               value: {{ .Values.skillsRepo.url | quote }}
-            - name: GIT_BRANCH
+            - name: SKILLS_REPO_BRANCH
               value: {{ .Values.skillsRepo.branch | quote }}
             - name: SKILLS_DIR
               value: {{ .Values.mountPath | quote }}
-            {{- if .Values.skillsRepo.tokenSecret }}
-            - name: GIT_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.skillsRepo.tokenSecret }}
-                  key: token
+            - name: LOG_LEVEL
+              value: {{ .Values.logLevel | quote }}
+            {{- if .Values.skillsRepo.apiBaseURL }}
+            - name: GITHUB_API_BASE_URL
+              value: {{ .Values.skillsRepo.apiBaseURL | quote }}
             {{- end }}
+            {{- include "skillsd.githubAuthEnv" $auth | nindent 12 }}
           volumeMounts:
             - name: skills-data
               mountPath: {{ .Values.mountPath }}
+            {{- with include "skillsd.githubAuthVolumeMount" $auth | trim }}{{- . | nindent 12 }}{{- end }}
       containers:
         - name: skillsd
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - containerPort: {{ .Values.service.port }}

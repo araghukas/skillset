@@ -3,6 +3,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ include "skillsd.registryFullname" . }}
+  namespace: {{ include "skillsd.namespace" . }}
   labels:
     {{- include "skillsd.labels" . | nindent 4 }}
     app.kubernetes.io/component: registry
@@ -31,7 +32,13 @@ spec:
     spec:
       serviceAccountName: {{ include "skillsd.serviceAccountName" . }}
       terminationGracePeriodSeconds: 30
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- $auth := dict "auth" .Values.registry.github "label" "registry.github" }}
       volumes:
+        {{- with include "skillsd.githubAuthVolume" $auth | trim }}{{- . | nindent 8 }}{{- end }}
         - name: repo-data
           persistentVolumeClaim:
             claimName: {{ include "skillsd.registryFullname" . }}
@@ -49,7 +56,7 @@ spec:
         {{- end }}
       containers:
         - name: skillsd-registry
-          image: "{{ .Values.registry.image.repository }}:{{ .Values.registry.image.tag }}"
+          image: "{{ .Values.registry.image.repository }}:{{ .Values.registry.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.registry.image.pullPolicy }}
           command: ["/skillsd-registry"]
           ports:
@@ -102,17 +109,13 @@ spec:
               value: {{ mul .Values.registry.maxFileContentSizeMiB 1048576 | quote }}
             - name: LOG_LEVEL
               value: {{ .Values.logLevel | quote }}
-            {{- if .Values.registry.github.tokenSecret }}
-            # Left unset, skillsd-registry starts with SubmitProposal disabled.
-            - name: GITHUB_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.registry.github.tokenSecret }}
-                  key: token
-            {{- end }}
+            # With no credential configured, skillsd-registry starts with
+            # SubmitProposal disabled and everything else working.
+            {{- include "skillsd.githubAuthEnv" $auth | nindent 12 }}
           volumeMounts:
             - name: repo-data
               mountPath: {{ .Values.registry.repoDir }}
+            {{- with include "skillsd.githubAuthVolumeMount" $auth | trim }}{{- . | nindent 12 }}{{- end }}
             {{- if .Values.registry.evidence.enabled }}
             - name: evidence-data
               mountPath: {{ .Values.registry.evidence.dbPath | dir }}

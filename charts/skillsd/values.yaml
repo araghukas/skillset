@@ -1,14 +1,17 @@
+namespace: ""
+
 replicaCount: 2
 
 image:
-  repository: skillsd
-  tag: latest
+  repository: ghcr.io/araghukas/skillsd
+  # tag defaults to the chart's appVersion, so a released chart pulls the
+  # image built from the same tag. Override for a local or pinned build.
+  tag: ""
   pullPolicy: IfNotPresent
 
 grpcAddr: ":8080"
 
-# logLevel sets the minimum slog level emitted by skillsd, e.g. "debug",
-# "info", "warn", "error".
+# logLevel sets the minimum slog level for skillsd and skillsd-registry.
 logLevel: info
 
 # grpcMaxRecvMsgSizeMiB / grpcMaxSendMsgSizeMiB cap the size (in MiB) of a
@@ -34,14 +37,35 @@ skillsRepo:
   # subPath is an optional subdirectory within the repo under which skill
   # directories actually live. Leave empty if skills sit at the repo root.
   subPath: skills
-  # cloneImage must have git available on PATH.
-  cloneImage: alpine/git:latest
 
-  # tokenSecret is the name of an existing secret containing a GitHub token
-  # (key "token") with read-only access to the repo - the same auth
-  # mechanism registry.github.tokenSecret uses below, just scoped to read
-  # instead of read/write. Leave empty for a public, unauthenticated clone.
+  # Authentication for the clone. Set githubApp (recommended) or
+  # tokenSecret, not both; leave both empty for a public, unauthenticated
+  # clone.
+  #
+  # githubApp is a GitHub App installation with "Contents: Read" on the
+  # repo.
+  githubApp:
+    # appId is the app's client ID ("Iv23...") or its numeric app ID -
+    # either works. Note this is NOT the installation ID below.
+    appId: ""
+    # installationId identifies the installation of the app to act as. An
+    # app is installed separately on each account or organization that
+    # adopts it; find this in the installation's settings URL.
+    installationId: ""
+    # privateKeySecret is the name of an existing secret holding the app's
+    # private key under the key "private-key.pem". Mounted as a file, not
+    # an env var.
+    privateKeySecret: ""
+
+  # tokenSecret is the name of an existing secret containing a token (key
+  # "token") with read access to the repo - a fine-grained PAT, or a Gitea
+  # token. Simpler than a GitHub App, and the only option against hosts
+  # that have no GitHub App equivalent.
   tokenSecret: ""
+
+  # apiBaseURL overrides the API base used to exchange the app's JWT for an
+  # installation token, for GitHub Enterprise. Only read in githubApp mode.
+  apiBaseURL: ""
 
 # mountPath is where the cloned repo is mounted in both the init container
 # (read-write) and the main container (read-only). Also set as SKILLS_DIR.
@@ -49,17 +73,33 @@ mountPath: /skills
 
 resources: {}
 
-# registry configures the optional skillsd-registry component: a
-# single-replica, persistent write path that lets AI agents propose changes
-# to skills as git commits and submit them as GitHub pull requests for
-# human review. Enabled by default; the read-only skillsd fleet above also
-# works standalone if you set this to false.
+# podSecurityContext applies to every pod in the chart. fsGroup matters when
+# githubApp auth is configured: the private key secret volume is owned by
+# root:fsGroup, never by the container's user, so without a matching fsGroup
+# the image's non-root user (uid/gid 65532, distroless nonroot) cannot read
+# it. Override runAsUser/runAsGroup/fsGroup if you build from another base.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+
+# registry configures the skillsd-registry component: a single-replica,
+# persistent write path that lets AI agents propose changes to skills as git
+# commits and submit them as GitHub pull requests for human review, and that
+# collects the outcome reports backing those proposals (see evidence below).
+#
+# Deployed by default. Setting enabled: false drops it entirely, leaving the
+# read-only skillsd fleet above to run standalone - a read-only deployment
+# with no propose or evidence path at all.
 registry:
   enabled: true
 
   image:
-    repository: skillsd
-    tag: latest
+    repository: ghcr.io/araghukas/skillsd
+    # Same image as skillsd above, run with a different entrypoint; tag
+    # likewise defaults to the chart's appVersion.
+    tag: ""
     pullPolicy: IfNotPresent
 
   # grpcAddr is passed through as GRPC_ADDR; service.port must match its
@@ -99,9 +139,7 @@ registry:
 
   skillsRepo:
     # url is the HTTPS clone URL of the skills repository. Usually the same
-    # value as skillsRepo.url above - kept as a separate field because this
-    # component needs push access (authenticated via github.tokenSecret
-    # below, a different, more privileged token than skillsRepo.tokenSecret).
+    # value as skillsRepo.url above.
     url: ""
     # baseBranch is the branch proposals fork from and pull requests target.
     baseBranch: main
@@ -112,8 +150,9 @@ registry:
   # submitProposalEnabled controls whether the SubmitProposal RPC is allowed
   # to push a proposal's branch and open a pull request. ProposeChange,
   # GetProposal, ListProposals, and GetSkillAtRef all work regardless -
-  # this only gates the final push+PR step. Leaving github.tokenSecret
-  # unset is by itself enough to run in propose-only mode.
+  # this only gates the final push+PR step. Setting it false is the explicit
+  # way to run propose-only; configuring no credential under github below
+  # has the same effect implicitly.
   submitProposalEnabled: true
 
   # autoSubmitEndorsements is how many agents must independently arrive at
@@ -188,13 +227,37 @@ registry:
     # against. Required only if submitProposalEnabled is true.
     owner: ""
     repo: ""
-    # tokenSecret is the name of an existing secret containing a GitHub
-    # token (key "token") with push and pull-request write access. Used for
-    # both the HTTPS git push and the GitHub REST API - one credential
-    # instead of two. Required only if submitProposalEnabled is true; leave
-    # empty to run with SubmitProposal disabled.
+
+    # Authentication for everything this component does against the remote -
+    # one credential, not several: the initial clone of skillsRepo.url into
+    # repoDir, the periodic base-branch fetch, the HTTPS push, and the
+    # pull-request API call. Set githubApp (recommended) or tokenSecret, not
+    # both.
+    #
+    # Leaving both empty runs in propose-only mode (SubmitProposal
+    # disabled), which is viable only against a public repo - a private one
+    # still needs a credential here just to clone and fetch.
+    #
+    # Whichever is used needs write access here, unlike skillsRepo above:
+    # "Contents: Read and write" plus "Pull requests: Read and write". It can
+    # be the same GitHub App installation skillsRepo.githubApp uses, if that
+    # app's permissions cover both.
+    githubApp:
+      # appId is the app's client ID ("Iv23...") or its numeric app ID.
+      appId: ""
+      # installationId identifies the installation to act as - a separate
+      # value from appId.
+      installationId: ""
+      # privateKeySecret is an existing secret holding the app's private
+      # key under the key "private-key.pem".
+      privateKeySecret: ""
+
+    # tokenSecret is an existing secret containing a token (key "token").
     tokenSecret: ""
-    # apiBaseURL overrides the GitHub API base, for GitHub Enterprise.
+
+    # apiBaseURL overrides the GitHub API base, for GitHub Enterprise - and
+    # for the local Gitea stand-in, whose pull-request API mirrors GitHub's.
+    # Also the host the app's JWT is exchanged at in githubApp mode.
     apiBaseURL: "https://api.github.com"
 
   resources: {}

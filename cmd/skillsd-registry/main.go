@@ -46,17 +46,18 @@ func run() error {
 	// container), RepoDir is expected to be a persistent volume this
 	// process owns: it clones into it on first start, then keeps reopening
 	// and mutating the same working copy across restarts.
-	repo, err := gitrepo.Open(ctx, cfg.RepoDir, cfg.SkillsRepoURL, cfg.SkillsRepoBaseBranch, cfg.GitHubToken)
+	repo, err := gitrepo.Open(ctx, cfg.RepoDir, cfg.SkillsRepoURL, cfg.SkillsRepoBaseBranch, cfg.GitHubAuth)
 	if err != nil {
 		return fmt.Errorf("opening skills repo: %w", err)
 	}
-	slog.Info("opened skills repo", "dir", cfg.RepoDir, "base_branch", cfg.SkillsRepoBaseBranch)
+	slog.Info("opened skills repo",
+		"dir", cfg.RepoDir, "base_branch", cfg.SkillsRepoBaseBranch, "github_auth_mode", cfg.GitHubAuthMode)
 	if !cfg.SubmitProposalEnabled {
 		slog.Warn("SubmitProposal is disabled: GitHub auth not configured or SUBMIT_PROPOSAL_ENABLED=false")
 	}
 
 	svc := proposals.New(repo, cfg.SkillsSubPath, cfg.MaxFileContentBytes)
-	gh := githubpr.New(cfg.GitHubAPIBaseURL, cfg.GitHubOwner, cfg.GitHubRepo, cfg.GitHubToken)
+	gh := githubpr.New(cfg.GitHubAPIBaseURL, cfg.GitHubOwner, cfg.GitHubRepo, cfg.GitHubAuth)
 
 	if cfg.AutoSubmitEndorsements > 0 {
 		slog.Warn("auto-submission is enabled: proposals corroborated by enough agents will open pull requests unprompted",

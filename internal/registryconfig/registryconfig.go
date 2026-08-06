@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/araghukas/skillset/internal/githubauth"
 	"github.com/araghukas/skillset/internal/proposals"
 )
 
@@ -46,9 +47,17 @@ type Config struct {
 	// SkillsSubPath.
 	SkillsSubPath string
 
-	// GitHubToken authenticates both the HTTPS git push and the GitHub
-	// REST API calls used to open pull requests.
-	GitHubToken string
+	// GitHubAuth supplies the credential for both the HTTPS git clone/
+	// fetch/push and the GitHub REST API calls used to open pull requests -
+	// one credential rather than two. Nil means none was configured, which
+	// disables SubmitProposal (see below) and limits the repo to public,
+	// unauthenticated access.
+	GitHubAuth githubauth.TokenSource
+
+	// GitHubAuthMode records which scheme GitHubAuth came from, for
+	// startup logging. It is githubauth.ModeNone whenever GitHubAuth is
+	// nil.
+	GitHubAuthMode githubauth.Mode
 
 	// GitHubOwner and GitHubRepo identify the repository pull requests are
 	// opened against.
@@ -62,8 +71,8 @@ type Config struct {
 	// SubmitProposalEnabled controls whether the ProposalService's
 	// SubmitProposal RPC is allowed to push branches and open pull
 	// requests. It's the SUBMIT_PROPOSAL_ENABLED env var (default true)
-	// AND-ed with whether GitHub auth (token/owner/repo) is actually
-	// configured.
+	// AND-ed with whether GitHub auth (a credential, plus owner/repo) is
+	// actually configured.
 	SubmitProposalEnabled bool
 
 	// AutoSubmitEndorsements is how many agents must independently arrive
@@ -183,13 +192,19 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("parsing EVIDENCE_BACKUP_INTERVAL: %w", err)
 	}
 
+	githubAuth, githubAuthMode, err := githubauth.LoadFromEnv()
+	if err != nil {
+		return Config{}, err
+	}
+
 	cfg := Config{
 		GRPCAddr:                getenv("GRPC_ADDR", ":8081"),
 		RepoDir:                 getenv("REPO_DIR", "/var/lib/skillsd-registry"),
 		SkillsRepoURL:           getenv("SKILLS_REPO_URL", ""),
 		SkillsRepoBaseBranch:    getenv("SKILLS_REPO_BASE_BRANCH", "main"),
 		SkillsSubPath:           getenv("SKILLS_SUBPATH", ""),
-		GitHubToken:             getenv("GITHUB_TOKEN", ""),
+		GitHubAuth:              githubAuth,
+		GitHubAuthMode:          githubAuthMode,
 		GitHubOwner:             getenv("GITHUB_OWNER", ""),
 		GitHubRepo:              getenv("GITHUB_REPO", ""),
 		GitHubAPIBaseURL:        getenv("GITHUB_API_BASE_URL", "https://api.github.com"),
@@ -216,7 +231,7 @@ func Load() (Config, error) {
 	// PR), not for the rest of the service. Rather than fail to start when
 	// it's absent, disable SubmitProposal.
 	cfg.SubmitProposalEnabled = submitProposalRequested &&
-		cfg.GitHubToken != "" && cfg.GitHubOwner != "" && cfg.GitHubRepo != ""
+		cfg.GitHubAuth != nil && cfg.GitHubOwner != "" && cfg.GitHubRepo != ""
 
 	return cfg, nil
 }

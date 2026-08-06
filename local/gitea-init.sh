@@ -2,8 +2,9 @@
 # One-time (idempotent) bootstrap for the local Gitea stand-in: applies
 # local/gitea.yaml, waits for it to come up, creates an admin user + a
 # "skills" repo, mints a read-only and a read/write token, seeds the repo
-# with a private copy of anthropics/skills' skills/ tree on `main` (a fresh
-# commit with no shared history or remote - see the seeding step below), and
+# with a private copy of an upstream skills repo's skills/ tree on `main`
+# (anthropics/skills by default; set GITEA_SEED_URL to use another - a
+# fresh commit with no shared history or remote, see the seeding step), and
 # writes the tokens to local/git-skillsd-token / local/git-skillsd-registry-token
 # - the same gitignored files the Tiltfile already looks for.
 #
@@ -18,8 +19,8 @@ KIND_CONTEXT="kind-skillsd"
 NAMESPACE="default"
 ADMIN_USER="skillset-admin"
 REPO_NAME="skills"
-UPSTREAM_URL="https://github.com/anthropics/skills.git"
-UPSTREAM_REF="main"
+UPSTREAM_URL="${GITEA_SEED_URL:-https://github.com/anthropics/skills.git}"
+UPSTREAM_REF="${GITEA_SEED_REF:-main}"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOCAL_DIR="$ROOT_DIR/local"
 READ_TOKEN_FILE="$LOCAL_DIR/git-skillsd-token"
@@ -59,7 +60,8 @@ fi
 # left behind) and fall through to a full rebootstrap, which overwrites
 # both files with freshly minted tokens further down.
 if [[ -f "$WRITE_TOKEN_FILE" ]]; then
-  if curl -fsS -H "Authorization: token $(cat "$WRITE_TOKEN_FILE")" \p://localhost:3000/api/v1/user" >/dev/null 2>&1; then
+  if curl -fsS -H "Authorization: token $(cat "$WRITE_TOKEN_FILE")" \
+      "http://localhost:3000/api/v1/user" >/dev/null 2>&1; then
     echo "gitea-init: $WRITE_TOKEN_FILE already authenticates against this Gitea instance; nothing to do."
     exit 0
   fi
@@ -115,7 +117,7 @@ READ_TOKEN="$(mint_token skillsd-read read:repository)"
 echo "gitea-init: minting read/write token"
 WRITE_TOKEN="$(mint_token skillsd-registry-write write:repository)"
 
-# Seed the gitea repo with a *private copy* of anthropics/skills' skills/
+# Seed the gitea repo with a *private copy* of the upstream repo's skills/
 # tree: a real, varied set of skills to test against, but with no shared
 # git history and no remote pointing back at the real GitHub repo. This
 # shallow-clones upstream into a scratch dir, copies just the file
@@ -131,6 +133,10 @@ git clone --depth 1 --branch "$UPSTREAM_REF" -q "$UPSTREAM_URL" "$UPSTREAM_DIR"
 # Copy only the file contents out, then discard the clone (and its .git,
 # and every trace of upstream history) before it touches SEED_DIR.
 SEED_DIR="$(mktemp -d)"
+if [[ ! -d "$UPSTREAM_DIR/skills" ]]; then
+  echo "gitea-init: $UPSTREAM_URL ($UPSTREAM_REF) has no skills/ directory to seed from." >&2
+  exit 1
+fi
 cp -R "$UPSTREAM_DIR/skills" "$SEED_DIR/skills"
 rm -rf "$UPSTREAM_DIR"
 UPSTREAM_DIR=""
@@ -149,7 +155,7 @@ git -C "$SEED_DIR" \
 git -C "$SEED_DIR" \
   -c user.name="gitea-init" \
   -c user.email="gitea-init@skillset.local" \
-  commit -q -m "seed: private copy of anthropics/skills' skills/ tree ($UPSTREAM_REF, $(date -u +%FT%TZ))"
+  commit -q -m "seed: private copy of $UPSTREAM_URL's skills/ tree ($UPSTREAM_REF, $(date -u +%FT%TZ))"
 
 # Push that single commit to Gitea's main - the only history it will ever have.
 git -C "$SEED_DIR" push -q \

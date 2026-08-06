@@ -4,7 +4,8 @@ Deploying `skillset` and pointing an agent at it, end to end.
 
 ## 1. Deploy the read fleet
 
-The minimum viable deployment is just `skillsd`, pointed at a public skills repo, with the write path off:
+The minimum viable deployment is just `skillsd`, pointed at a public skills
+repo, with the write path off:
 
 ```yaml
 # values.yaml
@@ -24,7 +25,32 @@ kubectl port-forward svc/skillsd 8080:8080
 grpcurl -plaintext localhost:8080 list          # confirm reflection + SkillService are up
 ```
 
-A private repo needs a read-scoped token — create the secret first, then reference it:
+A private repo needs credentials. The recommended route is a GitHub App:
+
+1. [Register a GitHub App](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/registering-a-github-app)
+   with `Contents: Read` under repository permissions.
+2. Generate a private key and download the `.pem`.
+3. Install the app on the skills repository. Note its **app ID** (or client ID)
+   from the app's settings page, and its **installation ID** from the
+   installation URL — `.../settings/installations/<installationId>`. These are
+   two different numbers.
+
+```bash
+kubectl create secret generic skillsd-github-app --from-file=private-key.pem=./your-app.private-key.pem
+```
+
+```yaml
+skillsRepo:
+  githubApp:
+    appId: "Iv23xxxxxxxxxxxxxxxx"
+    installationId: "12345678"
+    privateKeySecret: skillsd-github-app
+```
+
+<details> <summary>Or, a token</summary>
+
+A fine-grained PAT still works, and is the only option against a host with no
+GitHub App equivalent. Set `tokenSecret` **or** `githubApp`, not both:
 
 ```bash
 kubectl create secret generic skillsd-git-auth --from-literal=token=<fine-grained PAT, Contents: read>
@@ -34,15 +60,14 @@ kubectl create secret generic skillsd-git-auth --from-literal=token=<fine-graine
 skillsRepo:
   tokenSecret: skillsd-git-auth
 ```
+</details>
 
 ## 2. Add the write path (optional)
 
-Enable `skillsd-registry` once agents need to propose changes and/or report outcomes. It needs its own (more privileged) token:
-
-```bash
-kubectl create secret generic skillsd-registry-git-auth \
-  --from-literal=token=<fine-grained PAT, Contents: read/write + Pull requests: read/write>
-```
+Enable `skillsd-registry` once agents need to propose changes and/or report
+outcomes. It needs its own, more privileged credential: `Contents: Read and
+write` plus `Pull requests: Read and write`. Keeping it separate from step 1's
+is the point — the read fleet has no business holding something that can push.
 
 ```yaml
 registry:
@@ -52,8 +77,25 @@ registry:
   github:
     owner: "<org>"
     repo: "<skills-repo>"
+    githubApp:
+      appId: "Iv23yyyyyyyyyyyyyyyy"
+      installationId: "87654321"
+      privateKeySecret: skillsd-registry-github-app
+```
+
+<details> <summary>Or, a token</summary>
+
+```bash
+kubectl create secret generic skillsd-registry-git-auth \
+  --from-literal=token=<fine-grained PAT, Contents: read/write + Pull requests: read/write>
+```
+
+```yaml
+registry:
+  github:
     tokenSecret: skillsd-registry-git-auth
 ```
+</details>
 
 ```bash
 helm upgrade skillsd charts/skillsd -f values.yaml
@@ -61,11 +103,13 @@ kubectl port-forward svc/skillsd-registry 8081:8081
 grpcurl -plaintext localhost:8081 list skills.v1.ProposalService
 ```
 
-Full value reference: [helm-chart.md](helm-chart.md). Storage/backup implications of turning this on: [data-stores.md](data-stores.md).
+Full value reference: [helm-chart.md](helm-chart.md). Storage/backup
+implications of turning this on: [data-stores.md](data-stores.md).
 
 ## 3. Point an agent at it
 
-This is the only integration step — there's no SDK to install. An agent needs exactly two things: an endpoint, and the instruction to onboard itself.
+This is the only integration step — there's no SDK to install. An agent needs
+exactly two things: an endpoint, and the instruction to onboard itself.
 
 ```mermaid
 sequenceDiagram
@@ -84,7 +128,8 @@ sequenceDiagram
     Agent->>Write: ProposeChange / ReportOutcome ...
 ```
 
-In practice, "point an agent at it" means putting one or two lines in whatever system prompt or tool config wires the agent up — something like:
+In practice, "point an agent at it" means putting one or two lines in whatever
+system prompt or tool config wires the agent up — something like:
 
 ```
 You have access to a skillsd gRPC endpoint at skillsd.<namespace>.svc.cluster.local:8080
@@ -93,8 +138,15 @@ SkillService.GetClientGuide (no arguments) to learn the full API — which RPCs
 to call, when, and with what fields. Do this before assuming any RPC's shape.
 ```
 
-Everything past that point is between the agent and `GetClientGuide` — that guide (served by the running binary itself, not this repo) is the actual API reference. Treat it as authoritative over anything written here if the two ever disagree.
+Everything past that point is between the agent and `GetClientGuide` — that
+guide (served by the running binary itself, not this repo) is the actual API
+reference. Treat it as authoritative over anything written here if the two ever
+disagree.
 
 ## 4. Local development
 
-For iterating on `skillset` itself (not just deploying it), `make dev` brings up a local `kind` cluster with Tilt handling build/deploy/live-reload — see the root [README.md](../README.md#local-development) for prerequisites and [local/README.md](../local/README.md) for a full `grpcurl` walkthrough against the local instance.
+For iterating on `skillset` itself (not just deploying it), `make dev` brings up
+a local `kind` cluster with Tilt handling build/deploy/live-reload — see the
+root [README.md](../README.md#local-development) for prerequisites and
+[local/README.md](../local/README.md) for a full `grpcurl` walkthrough against
+the local instance.

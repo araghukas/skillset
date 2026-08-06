@@ -1,0 +1,109 @@
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    name: Go
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # `make fmt` rewrites files, so CI checks that gofmt has nothing to say.
+      - name: Check formatting
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "gofmt needed on:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Vet
+        run: make vet
+
+      - name: Test
+        run: make test
+
+      - name: Build
+        run: make build
+
+  helm:
+    name: Helm chart
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v4.2.3
+
+      - name: Install helm-unittest
+        run: |
+          helm plugin install https://github.com/helm-unittest/helm-unittest \
+            --version "$(make -s print-helm-unittest-version)" --verify=false
+
+      - name: Lint
+        run: make helm-lint
+
+      - name: Unit test chart
+        run: make helm-test
+
+      # Renders with local/values.yaml, matching the dev loop.
+      - name: Template with local values
+        run: make helm-template
+
+      - name: Template with chart defaults
+        run: helm template skillsd charts/skillsd
+
+  docker:
+    name: Docker image
+    # Publishing on main and tags is release.yml's job, and it builds the
+    # image itself. This one only proves a PR still builds.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: skillsd:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # The chart's command: fields reference /skillsd-registry and
+      # /skillsd-init by absolute path, so a rename in the Dockerfile breaks
+      # the deployment at runtime with nothing failing earlier. distroless
+      # has no shell to check with, so inspect the filesystem directly.
+      - name: Verify expected binaries are in the image
+        run: |
+          cid="$(docker create skillsd:ci)"
+          trap 'docker rm -f "$cid" >/dev/null' EXIT
+          docker export "$cid" | tar -t > /tmp/image-files.txt
+          for bin in skillsd skillsd-registry skillsd-init; do
+            grep -qx "$bin" /tmp/image-files.txt || {
+              echo "missing /$bin in image"; exit 1;
+            }
+          done
+          echo "all three binaries present"
