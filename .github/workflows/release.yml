@@ -39,7 +39,7 @@ jobs:
 
       - name: Compute tags
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.IMAGE }}
           # sha-<short> is the immutable one worth deploying; :main and
