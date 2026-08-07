@@ -301,6 +301,34 @@ func TestGetSkillAtRefResolvesBaseAndProposalBranch(t *testing.T) {
 	}
 }
 
+// TestGetSkillAtRefNeverCarriesRegistryOnboardingFooter guards the isolation
+// the registry's onboarding footer relies on: skillparse.Load is shared
+// between internal/registry (which appends the footer before serving) and
+// this package (which reads content straight out of git for diffing and
+// dedup). If the footer ever leaked in here, every proposal's diff would
+// show it as a spurious removal, and dedup hashing would drift from what
+// was actually proposed.
+func TestGetSkillAtRefNeverCarriesRegistryOnboardingFooter(t *testing.T) {
+	svc, branch := newTestService(t, "frontend-design", validSkillMD("frontend-design", "original"))
+
+	md, err := svc.GetSkillAtRef(context.Background(), "frontend-design", branch, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, cf := range md.ContextFiles {
+		if cf.FilePath != "SKILL.md" {
+			continue
+		}
+		if strings.Contains(cf.Content, "ProposeChange") {
+			t.Fatalf("expected git-sourced SKILL.md content to be free of the served onboarding footer, got: %q", cf.Content)
+		}
+		if cf.Content != validSkillMD("frontend-design", "original") {
+			t.Fatalf("expected git-sourced SKILL.md content to match what was committed exactly, got: %q", cf.Content)
+		}
+	}
+}
+
 func TestGetSkillAtRefEmptyRefResolvesToBaseHead(t *testing.T) {
 	svc, _ := newTestService(t, "frontend-design", validSkillMD("frontend-design", "original"))
 
