@@ -40,7 +40,7 @@ jobs:
         with:
           version: v4.2.3
 
-      - uses: azure/setup-kubectl@v4
+      - uses: azure/setup-kubectl@v5
 
       # install_only: true because ctlptl (via `make cluster-up`) creates the
       # actual cluster - this step just puts the kind binary on PATH.
