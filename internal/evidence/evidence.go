@@ -24,9 +24,17 @@ import (
 	_ "modernc.org/sqlite" // pure-Go driver: the binaries build CGO_ENABLED=0
 )
 
-// Verdict is how one skill fared in one session. The values mirror
-// skills.v1.Verdict; the store keeps its own type so the schema doesn't
-// shift underneath it if the proto's numbering ever changes.
+// Verdict is how one skill fared in one session.
+//
+// The values are deliberately observable outcomes rather than a
+// satisfaction rating: an agent's opinion of whether a skill was "good" is
+// noise, but whether it had to work around the skill, or the skill's
+// instructions were contradicted by reality, is a fact about the session.
+// Each value also implies a different repair.
+//
+// The integers are storage and are frozen - they are written to SQLite and
+// form part of the signal_rollup primary key. The wire form is the string
+// in verdict.go. See TestVerdictIntegersAreFrozen.
 type Verdict int
 
 const (

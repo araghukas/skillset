@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	skillsv1 "github.com/araghukas/skillset/gen/skills/v1"
 	"github.com/araghukas/skillset/internal/gitrepo"
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/object"
@@ -84,15 +83,15 @@ func validSkillMD(name, description string) string {
 func TestProposeChangeCreatesProposal(t *testing.T) {
 	svc, _ := newTestService(t, "frontend-design", validSkillMD("frontend-design", "designs frontends"))
 
-	res, err := svc.ProposeChange(context.Background(), &skillsv1.ProposeChangeRequest{
+	res, err := svc.ProposeChange(context.Background(), ProposeInput{
 		SkillName:  "frontend-design",
-		AgentId:    "agent-1",
-		ProposalId: "fix-typo",
-		Files: []*skillsv1.FileChange{
+		AgentID:    "agent-1",
+		ProposalID: "fix-typo",
+		Files: []FileEdit{
 			{FilePath: "SKILL.md", Content: validSkillMD("frontend-design", "designs frontends, fixed")},
 		},
 		CommitMessage:   "fix typo",
-		SourceThreadUri: "s3://threads/abc",
+		SourceThreadURI: "s3://threads/abc",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -107,19 +106,19 @@ func TestProposeChangeCreatesProposal(t *testing.T) {
 	if p.Diff == "" {
 		t.Fatal("expected non-empty diff")
 	}
-	if p.SourceThreadUri != "s3://threads/abc" {
-		t.Fatalf("expected source_thread_uri to round-trip, got %q", p.SourceThreadUri)
+	if p.SourceThreadURI != "s3://threads/abc" {
+		t.Fatalf("expected source_thread_uri to round-trip, got %q", p.SourceThreadURI)
 	}
 }
 
 func TestProposeChangeRejectsInvalidFrontmatter(t *testing.T) {
 	svc, _ := newTestService(t, "frontend-design", validSkillMD("frontend-design", "designs frontends"))
 
-	_, err := svc.ProposeChange(context.Background(), &skillsv1.ProposeChangeRequest{
+	_, err := svc.ProposeChange(context.Background(), ProposeInput{
 		SkillName:  "frontend-design",
-		AgentId:    "agent-1",
-		ProposalId: "break-it",
-		Files: []*skillsv1.FileChange{
+		AgentID:    "agent-1",
+		ProposalID: "break-it",
+		Files: []FileEdit{
 			{FilePath: "SKILL.md", Content: "not valid frontmatter"},
 		},
 		CommitMessage: "break it",
@@ -132,11 +131,11 @@ func TestProposeChangeRejectsInvalidFrontmatter(t *testing.T) {
 func TestProposeChangeRejectsNonUTF8Content(t *testing.T) {
 	svc, _ := newTestService(t, "frontend-design", validSkillMD("frontend-design", "designs frontends"))
 
-	_, err := svc.ProposeChange(context.Background(), &skillsv1.ProposeChangeRequest{
+	_, err := svc.ProposeChange(context.Background(), ProposeInput{
 		SkillName:  "frontend-design",
-		AgentId:    "agent-1",
-		ProposalId: "bad-encoding",
-		Files: []*skillsv1.FileChange{
+		AgentID:    "agent-1",
+		ProposalID: "bad-encoding",
+		Files: []FileEdit{
 			{FilePath: "SKILL.md", Content: string([]byte{0x89, 0x50, 0x4E, 0x47, 0xFF, 0xFE})},
 		},
 		CommitMessage: "bad encoding",
@@ -149,11 +148,11 @@ func TestProposeChangeRejectsNonUTF8Content(t *testing.T) {
 func TestProposeChangeRejectsOversizedContent(t *testing.T) {
 	svc, _ := newTestService(t, "frontend-design", validSkillMD("frontend-design", "designs frontends"))
 
-	_, err := svc.ProposeChange(context.Background(), &skillsv1.ProposeChangeRequest{
+	_, err := svc.ProposeChange(context.Background(), ProposeInput{
 		SkillName:  "frontend-design",
-		AgentId:    "agent-1",
-		ProposalId: "too-big",
-		Files: []*skillsv1.FileChange{
+		AgentID:    "agent-1",
+		ProposalID: "too-big",
+		Files: []FileEdit{
 			{FilePath: "SKILL.md", Content: strings.Repeat("a", DefaultMaxFileContentBytes+1)},
 		},
 		CommitMessage: "too big",
@@ -167,11 +166,11 @@ func TestProposeChangeAllowsOversizedContentWhenDeleted(t *testing.T) {
 	svc, _ := newTestService(t, "frontend-design", validSkillMD("frontend-design", "designs frontends"))
 
 	// Content is ignored (and thus not validated) when deleted is set.
-	_, err := svc.ProposeChange(context.Background(), &skillsv1.ProposeChangeRequest{
+	_, err := svc.ProposeChange(context.Background(), ProposeInput{
 		SkillName:  "frontend-design",
-		AgentId:    "agent-1",
-		ProposalId: "delete-something",
-		Files: []*skillsv1.FileChange{
+		AgentID:    "agent-1",
+		ProposalID: "delete-something",
+		Files: []FileEdit{
 			{FilePath: "SKILL.md", Content: validSkillMD("frontend-design", "kept")},
 			{FilePath: "references/old.txt", Deleted: true, Content: strings.Repeat("a", DefaultMaxFileContentBytes+1)},
 		},
@@ -186,12 +185,12 @@ func TestProposeChangeAppendsSecondCommitOnRepeatCall(t *testing.T) {
 	svc, _ := newTestService(t, "frontend-design", validSkillMD("frontend-design", "designs frontends"))
 	ctx := context.Background()
 
-	req := func(desc string) *skillsv1.ProposeChangeRequest {
-		return &skillsv1.ProposeChangeRequest{
+	req := func(desc string) ProposeInput {
+		return ProposeInput{
 			SkillName:  "frontend-design",
-			AgentId:    "agent-1",
-			ProposalId: "iterate",
-			Files: []*skillsv1.FileChange{
+			AgentID:    "agent-1",
+			ProposalID: "iterate",
+			Files: []FileEdit{
 				{FilePath: "SKILL.md", Content: validSkillMD("frontend-design", desc)},
 			},
 			CommitMessage: desc,
@@ -225,11 +224,11 @@ func TestListProposalsFiltersBySkillAndAgent(t *testing.T) {
 
 	mustPropose := func(agentID, proposalID string) {
 		t.Helper()
-		_, err := svc.ProposeChange(ctx, &skillsv1.ProposeChangeRequest{
+		_, err := svc.ProposeChange(ctx, ProposeInput{
 			SkillName:  "frontend-design",
-			AgentId:    agentID,
-			ProposalId: proposalID,
-			Files: []*skillsv1.FileChange{
+			AgentID:    agentID,
+			ProposalID: proposalID,
+			Files: []FileEdit{
 				{FilePath: "SKILL.md", Content: validSkillMD("frontend-design", agentID+"-"+proposalID)},
 			},
 			CommitMessage: "change",
@@ -253,7 +252,7 @@ func TestListProposalsFiltersBySkillAndAgent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(byAgent) != 1 || byAgent[0].AgentId != "agent-1" {
+	if len(byAgent) != 1 || byAgent[0].AgentID != "agent-1" {
 		t.Fatalf("expected only agent-1's proposal, got %+v", byAgent)
 	}
 }
@@ -270,11 +269,11 @@ func TestGetSkillAtRefResolvesBaseAndProposalBranch(t *testing.T) {
 		t.Fatalf("expected base description %q, got %q", "original", atBase.Description)
 	}
 
-	res, err := svc.ProposeChange(ctx, &skillsv1.ProposeChangeRequest{
+	res, err := svc.ProposeChange(ctx, ProposeInput{
 		SkillName:  "frontend-design",
-		AgentId:    "agent-1",
-		ProposalId: "update-desc",
-		Files: []*skillsv1.FileChange{
+		AgentID:    "agent-1",
+		ProposalID: "update-desc",
+		Files: []FileEdit{
 			{FilePath: "SKILL.md", Content: validSkillMD("frontend-design", "updated")},
 		},
 		CommitMessage: "update description",

@@ -4,18 +4,23 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
 
-	skillsv1 "github.com/araghukas/skillset/gen/skills/v1"
+	"github.com/araghukas/skillset/internal/skill"
 	"github.com/araghukas/skillset/internal/skillparse"
 	"github.com/araghukas/skillset/internal/storage"
 )
 
 // Skill is a single entry in the registry's skill index.
+//
+// Metadata is shared across every concurrent request that reads this entry.
+// Callers that need to mutate it - stripping context files, say - must
+// Clone it first; see skill.Metadata.Clone.
 type Skill struct {
-	Metadata *skillsv1.SkillMetadata
+	Metadata *skill.Metadata
 }
 
 // index is the immutable snapshot swapped in on each load.
@@ -54,13 +59,20 @@ func (r *Registry) Get(name string) (*Skill, bool) {
 	return s, ok
 }
 
-// List returns every skill in the current index.
+// List returns every skill in the current index, sorted by name.
+//
+// The order is part of the contract, not an accident of iteration: the
+// list_skills tool paginates with an opaque cursor, and a cursor is only
+// meaningful over a stable sequence.
 func (r *Registry) List() []*Skill {
 	idx := r.current.Load()
 	out := make([]*Skill, 0, len(idx.byName))
 	for _, s := range idx.byName {
 		out = append(out, s)
 	}
+	slices.SortFunc(out, func(a, b *Skill) int {
+		return strings.Compare(a.Metadata.Name, b.Metadata.Name)
+	})
 	return out
 }
 

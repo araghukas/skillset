@@ -1,5 +1,5 @@
 // Package proposals implements the branch-naming convention and
-// orchestration behind ProposalService: turning an agent's proposed file
+// orchestration behind the proposal tools: turning an agent's proposed file
 // changes into a commit on a namespaced branch, and reading proposals and
 // skills back out of the underlying gitrepo.Repo.
 package proposals
@@ -12,14 +12,12 @@ import (
 	"time"
 	"unicode/utf8"
 
-	skillsv1 "github.com/araghukas/skillset/gen/skills/v1"
 	"github.com/araghukas/skillset/internal/gitrepo"
+	"github.com/araghukas/skillset/internal/skill"
 	"github.com/araghukas/skillset/internal/skillparse"
 	"github.com/araghukas/skillset/internal/storage"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // sourceThreadTrailerKey is the commit-message trailer a proposal's
@@ -34,7 +32,7 @@ const sourceThreadTrailerKey = "Source-Thread"
 // disabled, unreachable, or has since aged the reports out.
 const motivatedByTrailerKey = "Motivated-By"
 
-// DefaultMaxFileContentBytes is the default cap on a single FileChange's
+// DefaultMaxFileContentBytes is the default cap on a single FileEdit's
 // content. Skill files (SKILL.md, small scripts/references) are expected
 // to be well under this.
 const DefaultMaxFileContentBytes = 1 << 20 // 1 MiB
@@ -50,18 +48,10 @@ type Service struct {
 // New returns a Service backed by repo. subPath is the optional
 // subdirectory within the repo skill directories live under, matching
 // internal/registry's SKILLS_SUBPATH. maxFileBytes caps a single
-// FileChange's content; use DefaultMaxFileContentBytes if the caller has no
+// FileEdit's content; use DefaultMaxFileContentBytes if the caller has no
 // specific requirement.
 func New(repo *gitrepo.Repo, subPath string, maxFileBytes int) *Service {
 	return &Service{repo: repo, subPath: subPath, maxFileBytes: maxFileBytes}
-}
-
-// ProposeResult is the outcome of a ProposeChange call: either the caller's
-// own proposal, or - when their content already existed - the proposal they
-// were recorded as endorsing instead.
-type ProposeResult struct {
-	Proposal     *skillsv1.Proposal
-	Deduplicated bool
 }
 
 // ProposeChange commits req's file changes onto the caller's proposal
@@ -85,43 +75,43 @@ type ProposeResult struct {
 // via GetProposal, since a proposal branch is just the agent's own history
 // and an invalid intermediate commit there is harmless. The agent is
 // expected to fix it with a follow-up ProposeChange call.
-func (s *Service) ProposeChange(ctx context.Context, req *skillsv1.ProposeChangeRequest) (*ProposeResult, error) {
-	if req.GetSkillName() == "" {
+func (s *Service) ProposeChange(ctx context.Context, req ProposeInput) (*ProposeResult, error) {
+	if req.SkillName == "" {
 		return nil, fmt.Errorf("proposals: skill_name is required")
 	}
-	if req.GetAgentId() == "" {
+	if req.AgentID == "" {
 		return nil, fmt.Errorf("proposals: agent_id is required")
 	}
-	if req.GetProposalId() == "" {
+	if req.ProposalID == "" {
 		return nil, fmt.Errorf("proposals: proposal_id is required")
 	}
 	// The branch name and every annotation ref hanging off it are built by
 	// joining these three with "/", and parsed back by splitting on it.
 	for label, v := range map[string]string{
-		"agent_id":    req.GetAgentId(),
-		"skill_name":  req.GetSkillName(),
-		"proposal_id": req.GetProposalId(),
+		"agent_id":    req.AgentID,
+		"skill_name":  req.SkillName,
+		"proposal_id": req.ProposalID,
 	} {
 		if strings.Contains(v, "/") {
 			return nil, fmt.Errorf("proposals: %s %q must not contain %q", label, v, "/")
 		}
 	}
-	if len(req.GetFiles()) == 0 {
+	if len(req.Files) == 0 {
 		return nil, fmt.Errorf("proposals: at least one file change is required")
 	}
-	for _, fc := range req.GetFiles() {
-		if fc.GetDeleted() {
+	for _, fc := range req.Files {
+		if fc.Deleted {
 			continue
 		}
-		if !utf8.ValidString(fc.GetContent()) {
-			return nil, fmt.Errorf("proposals: file %q is not valid UTF-8", fc.GetFilePath())
+		if !utf8.ValidString(fc.Content) {
+			return nil, fmt.Errorf("proposals: file %q is not valid UTF-8", fc.FilePath)
 		}
-		if len(fc.GetContent()) > s.maxFileBytes {
-			return nil, fmt.Errorf("proposals: file %q is %d bytes, exceeding the %d byte limit", fc.GetFilePath(), len(fc.GetContent()), s.maxFileBytes)
+		if len(fc.Content) > s.maxFileBytes {
+			return nil, fmt.Errorf("proposals: file %q is %d bytes, exceeding the %d byte limit", fc.FilePath, len(fc.Content), s.maxFileBytes)
 		}
 	}
 
-	branch := branchName(req.GetAgentId(), req.GetSkillName(), req.GetProposalId())
+	branch := branchName(req.AgentID, req.SkillName, req.ProposalID)
 
 	base, err := s.repo.BaseHead()
 	if err != nil {
@@ -131,18 +121,18 @@ func (s *Service) ProposeChange(ctx context.Context, req *skillsv1.ProposeChange
 	_, branchErr := s.repo.ResolveRef(branch)
 	isNewBranch := branchErr != nil
 
-	if isNewBranch && !req.GetAllowDuplicate() {
+	if isNewBranch && !req.AllowDuplicate {
 		dup, err := s.duplicateOf(ctx, req, base)
 		if err != nil {
 			return nil, err
 		}
 		if dup != nil {
-			if err := s.Endorse(dup.GetBranch(), req.GetAgentId(), plumbing.NewHash(dup.GetHeadSha())); err != nil {
+			if err := s.Endorse(dup.Branch, req.AgentID, plumbing.NewHash(dup.HeadSHA)); err != nil {
 				return nil, fmt.Errorf("proposals: recording endorsement: %w", err)
 			}
 			// Re-read so the returned proposal carries the endorsement
 			// just written, and the corroboration count that follows from it.
-			refreshed, err := s.GetProposal(ctx, dup.GetBranch())
+			refreshed, err := s.GetProposal(ctx, dup.Branch)
 			if err != nil {
 				return nil, err
 			}
@@ -150,24 +140,24 @@ func (s *Service) ProposeChange(ctx context.Context, req *skillsv1.ProposeChange
 		}
 	}
 
-	files := make([]gitrepo.FileChange, 0, len(req.GetFiles()))
-	for _, fc := range req.GetFiles() {
+	files := make([]gitrepo.FileChange, 0, len(req.Files))
+	for _, fc := range req.Files {
 		files = append(files, gitrepo.FileChange{
-			Path:    path.Join(s.subPath, req.GetSkillName(), fc.GetFilePath()),
-			Deleted: fc.GetDeleted(),
-			Content: []byte(fc.GetContent()),
+			Path:    path.Join(s.subPath, req.SkillName, fc.FilePath),
+			Deleted: fc.Deleted,
+			Content: []byte(fc.Content),
 		})
 	}
 
-	message := req.GetCommitMessage()
+	message := req.CommitMessage
 	if message == "" {
-		message = fmt.Sprintf("propose: %s", req.GetSkillName())
+		message = fmt.Sprintf("propose: %s", req.SkillName)
 	}
-	message = appendTrailers(message, req.GetSourceThreadUri(), req.GetMotivatingReportIds())
+	message = appendTrailers(message, req.SourceThreadURI, req.MotivatingReportIDs)
 
 	author := object.Signature{
-		Name:  req.GetAgentId(),
-		Email: req.GetAgentId() + "@agents.local",
+		Name:  req.AgentID,
+		Email: req.AgentID + "@agents.local",
 		When:  time.Now(),
 	}
 
@@ -176,7 +166,7 @@ func (s *Service) ProposeChange(ctx context.Context, req *skillsv1.ProposeChange
 		return nil, fmt.Errorf("proposals: committing change: %w", err)
 	}
 
-	if _, err := s.skillAt(ctx, req.GetSkillName(), head); err != nil {
+	if _, err := s.skillAt(ctx, req.SkillName, head); err != nil {
 		return nil, fmt.Errorf("proposals: resulting skill is invalid: %w", err)
 	}
 
@@ -193,27 +183,33 @@ func (s *Service) ProposeChange(ctx context.Context, req *skillsv1.ProposeChange
 // The hash is computed from the prospective file set rather than from a
 // commit, so the common case - discovering the duplicate - costs nothing and
 // leaves no abandoned branch behind.
-func (s *Service) duplicateOf(ctx context.Context, req *skillsv1.ProposeChangeRequest, base plumbing.Hash) (*skillsv1.Proposal, error) {
-	current, err := s.skillFilesAt(ctx, req.GetSkillName(), base)
+func (s *Service) duplicateOf(ctx context.Context, req ProposeInput, base plumbing.Hash) (*Proposal, error) {
+	current, err := s.skillFilesAt(ctx, req.SkillName, base)
 	if err != nil {
 		// A skill that doesn't exist at base yet can't have a duplicate
 		// proposal to collapse into; let the commit path handle it.
 		return nil, nil
 	}
 
-	prospective := applyChanges(current, s.subPath, req.GetSkillName(), req.GetFiles())
-	return s.findDuplicate(ctx, req.GetSkillName(), req.GetAgentId(), hashFiles(prospective))
+	prospective := applyChanges(current, s.subPath, req.SkillName, req.Files)
+	return s.findDuplicate(ctx, req.SkillName, req.AgentID, hashFiles(prospective))
 }
 
 // ListProposals returns every proposal, optionally filtered by skill and/or
 // agent.
-func (s *Service) ListProposals(ctx context.Context, skillFilter, agentFilter string) ([]*skillsv1.Proposal, error) {
+//
+// The returned proposals carry no diff. Computing one means a tree-to-tree
+// comparison per branch, and the results land in a calling agent's context
+// window - a listing of twenty proposals should not cost twenty diffs when
+// the caller is choosing which one to look at. Fetch a specific proposal
+// with GetProposal to see its diff.
+func (s *Service) ListProposals(ctx context.Context, skillFilter, agentFilter string) ([]*Proposal, error) {
 	names, err := s.repo.BranchesWithPrefix("proposals/")
 	if err != nil {
 		return nil, fmt.Errorf("proposals: listing branches: %w", err)
 	}
 
-	var out []*skillsv1.Proposal
+	var out []*Proposal
 	for _, name := range names {
 		agentID, skillName, _, ok := parseBranch(name)
 		if !ok {
@@ -226,7 +222,7 @@ func (s *Service) ListProposals(ctx context.Context, skillFilter, agentFilter st
 			continue
 		}
 
-		p, err := s.GetProposal(ctx, name)
+		p, err := s.getProposal(ctx, name, false)
 		if err != nil {
 			return nil, err
 		}
@@ -235,8 +231,15 @@ func (s *Service) ListProposals(ctx context.Context, skillFilter, agentFilter st
 	return out, nil
 }
 
-// GetProposal fetches a single proposal by its fully-qualified branch name.
-func (s *Service) GetProposal(ctx context.Context, branch string) (*skillsv1.Proposal, error) {
+// GetProposal fetches a single proposal, with its diff, by its
+// fully-qualified branch name.
+func (s *Service) GetProposal(ctx context.Context, branch string) (*Proposal, error) {
+	return s.getProposal(ctx, branch, true)
+}
+
+// getProposal reads one proposal branch. withDiff controls whether the
+// unified diff is computed; see ListProposals for why it is optional.
+func (s *Service) getProposal(ctx context.Context, branch string, withDiff bool) (*Proposal, error) {
 	agentID, skillName, proposalID, ok := parseBranch(branch)
 	if !ok {
 		return nil, fmt.Errorf("proposals: %q is not a proposal branch (want proposals/<agent>/<skill>/<id>)", branch)
@@ -255,16 +258,19 @@ func (s *Service) GetProposal(ctx context.Context, branch string) (*skillsv1.Pro
 		return nil, fmt.Errorf("proposals: finding fork point of %q: %w", branch, err)
 	}
 
-	diff, err := s.repo.Diff(base, head)
-	if err != nil {
-		return nil, fmt.Errorf("proposals: diffing %q: %w", branch, err)
+	var diff string
+	if withDiff {
+		diff, err = s.repo.Diff(base, head)
+		if err != nil {
+			return nil, fmt.Errorf("proposals: diffing %q: %w", branch, err)
+		}
 	}
 	log, err := s.repo.Log(base, head)
 	if err != nil {
 		return nil, fmt.Errorf("proposals: reading history of %q: %w", branch, err)
 	}
 
-	commits := make([]*skillsv1.CommitInfo, 0, len(log))
+	commits := make([]Commit, 0, len(log))
 	var updatedAt time.Time
 	var sourceThreadURI string
 	var reportIDs []string
@@ -285,11 +291,11 @@ func (s *Service) GetProposal(ctx context.Context, branch string) (*skillsv1.Pro
 			seenReport[id] = struct{}{}
 			reportIDs = append(reportIDs, id)
 		}
-		commits = append(commits, &skillsv1.CommitInfo{
-			Sha:        c.SHA,
+		commits = append(commits, Commit{
+			SHA:        c.SHA,
 			Message:    c.Message,
 			Author:     c.Author,
-			AuthoredAt: timestamppb.New(authoredAt),
+			AuthoredAt: authoredAt,
 		})
 	}
 
@@ -302,27 +308,27 @@ func (s *Service) GetProposal(ctx context.Context, branch string) (*skillsv1.Pro
 		return nil, fmt.Errorf("proposals: reading endorsements of %q: %w", branch, err)
 	}
 
-	return &skillsv1.Proposal{
-		ProposalId:          proposalID,
+	return &Proposal{
+		ProposalID:          proposalID,
 		Branch:              branch,
 		SkillName:           skillName,
-		AgentId:             agentID,
-		BaseSha:             base.String(),
-		HeadSha:             head.String(),
+		AgentID:             agentID,
+		BaseSHA:             base.String(),
+		HeadSHA:             head.String(),
 		Diff:                diff,
 		Commits:             commits,
-		SourceThreadUri:     sourceThreadURI,
-		UpdatedAt:           timestamppb.New(updatedAt),
+		SourceThreadURI:     sourceThreadURI,
+		UpdatedAt:           updatedAt,
 		ContentHash:         contentHash,
 		Endorsements:        endorsements,
 		Corroboration:       corroboration,
-		MotivatingReportIds: reportIDs,
+		MotivatingReportIDs: reportIDs,
 	}, nil
 }
 
 // GetSkillAtRef resolves ref (a branch name, a commit SHA, or "" for the
 // base branch HEAD) and returns skillName's metadata as of that commit.
-func (s *Service) GetSkillAtRef(ctx context.Context, skillName, ref string, includeContextFiles bool) (*skillsv1.SkillMetadata, error) {
+func (s *Service) GetSkillAtRef(ctx context.Context, skillName, ref string, includeContextFiles bool) (*skill.Metadata, error) {
 	hash, err := s.repo.ResolveRef(ref)
 	if err != nil {
 		return nil, fmt.Errorf("proposals: resolving ref %q: %w", ref, err)
@@ -333,8 +339,7 @@ func (s *Service) GetSkillAtRef(ctx context.Context, skillName, ref string, incl
 		return nil, err
 	}
 	if !includeContextFiles {
-		md = proto.Clone(md).(*skillsv1.SkillMetadata)
-		md.ContextFiles = nil
+		md = md.WithoutContextFiles()
 	}
 	return md, nil
 }
@@ -371,7 +376,7 @@ func (s *Service) Push(ctx context.Context, branch string) error {
 	return s.repo.Push(ctx, branch, refs...)
 }
 
-func (s *Service) skillAt(ctx context.Context, skillName string, hash plumbing.Hash) (*skillsv1.SkillMetadata, error) {
+func (s *Service) skillAt(ctx context.Context, skillName string, hash plumbing.Hash) (*skill.Metadata, error) {
 	tree, err := s.repo.Tree(hash)
 	if err != nil {
 		return nil, err

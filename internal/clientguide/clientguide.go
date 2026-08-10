@@ -1,9 +1,9 @@
 // Package clientguide embeds skillsd's own client-facing usage guide: a
 // SKILL.md, shaped and parsed exactly like any other skill, that explains
-// SkillService/ProposalService to a calling agent. It's embedded in the
-// server binary rather than read from the skills repo the registry indexes,
-// so it can't drift from the proto it documents and is always available
-// regardless of how (or whether) the skills repo is configured.
+// the skillsd and skillsd-registry tools to a calling agent. It's embedded
+// in the server binary rather than read from the skills repo the registry
+// indexes, so it can't drift from the tools it documents and is always
+// available regardless of how (or whether) the skills repo is configured.
 package clientguide
 
 import (
@@ -14,7 +14,7 @@ import (
 	"mime"
 	"path/filepath"
 
-	skillsv1 "github.com/araghukas/skillset/gen/skills/v1"
+	"github.com/araghukas/skillset/internal/skill"
 	"github.com/araghukas/skillset/internal/skillparse"
 	"github.com/araghukas/skillset/internal/storage"
 )
@@ -25,7 +25,7 @@ var embedded embed.FS
 // Guide is the parsed metadata and content of the embedded client guide.
 var Guide = mustLoad()
 
-func mustLoad() *skillsv1.SkillMetadata {
+func mustLoad() *skill.Metadata {
 	ctx := context.Background()
 	backend := &embedBackend{fsys: embedded}
 

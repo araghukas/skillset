@@ -12,6 +12,7 @@ import (
 	skillsv1 "github.com/araghukas/skillset/gen/skills/v1"
 	"github.com/araghukas/skillset/internal/githubpr"
 	"github.com/araghukas/skillset/internal/proposals"
+	"github.com/araghukas/skillset/internal/protomap"
 	"github.com/go-git/go-git/v5/plumbing"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -26,7 +27,7 @@ type Server struct {
 	github                *githubpr.Client
 	baseBranch            string
 	submitProposalEnabled bool
-	autoSubmitThreshold   int32
+	autoSubmitThreshold   int
 }
 
 // New returns a Server backed by svc, opening pull requests via gh against
@@ -40,7 +41,7 @@ type Server struct {
 // asking. Zero disables it, which is the default: it is the one behavior
 // here that acts on its own, and it should be switched on deliberately,
 // with the trust model behind agent_id understood first.
-func New(svc *proposals.Service, gh *githubpr.Client, baseBranch string, submitProposalEnabled bool, autoSubmitThreshold int32) *Server {
+func New(svc *proposals.Service, gh *githubpr.Client, baseBranch string, submitProposalEnabled bool, autoSubmitThreshold int) *Server {
 	return &Server{
 		proposals:             svc,
 		github:                gh,
@@ -51,13 +52,13 @@ func New(svc *proposals.Service, gh *githubpr.Client, baseBranch string, submitP
 }
 
 func (s *Server) ProposeChange(ctx context.Context, req *skillsv1.ProposeChangeRequest) (*skillsv1.ProposeChangeResponse, error) {
-	res, err := s.proposals.ProposeChange(ctx, req)
+	res, err := s.proposals.ProposeChange(ctx, protomap.ProposeInput(req))
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 
 	resp := &skillsv1.ProposeChangeResponse{
-		Proposal:     res.Proposal,
+		Proposal:     protomap.Proposal(res.Proposal),
 		Deduplicated: res.Deduplicated,
 	}
 	resp.AutoSubmitted = s.maybeAutoSubmit(ctx, res.Proposal)
@@ -71,24 +72,24 @@ func (s *Server) ProposeChange(ctx context.Context, req *skillsv1.ProposeChangeR
 // contribution is already committed and endorsed, and turning a GitHub
 // outage into a failed ProposeChange would discard work that succeeded. The
 // proposal remains submittable by hand.
-func (s *Server) maybeAutoSubmit(ctx context.Context, p *skillsv1.Proposal) *skillsv1.SubmitProposalResponse {
+func (s *Server) maybeAutoSubmit(ctx context.Context, p *proposals.Proposal) *skillsv1.SubmitProposalResponse {
 	if s.autoSubmitThreshold <= 0 || !s.submitProposalEnabled {
 		return nil
 	}
-	if p.GetCorroboration() < s.autoSubmitThreshold {
+	if p.Corroboration < s.autoSubmitThreshold {
 		return nil
 	}
 
 	submitted, err := s.submit(ctx, p, "", "")
 	if err != nil {
 		slog.Error("auto-submit failed; proposal is still submittable by hand",
-			"branch", p.GetBranch(), "corroboration", p.GetCorroboration(), "error", err)
+			"branch", p.Branch, "corroboration", p.Corroboration, "error", err)
 		return nil
 	}
 	slog.Info("auto-submitted corroborated proposal",
-		"branch", p.GetBranch(), "corroboration", p.GetCorroboration(),
-		"threshold", s.autoSubmitThreshold, "pull_request", submitted.GetPullRequestUrl())
-	return submitted
+		"branch", p.Branch, "corroboration", p.Corroboration,
+		"threshold", s.autoSubmitThreshold, "pull_request", submitted.PullRequestURL)
+	return protomap.Submission(submitted)
 }
 
 func (s *Server) ListProposalClusters(ctx context.Context, req *skillsv1.ListProposalClustersRequest) (*skillsv1.ListProposalClustersResponse, error) {
@@ -96,7 +97,7 @@ func (s *Server) ListProposalClusters(ctx context.Context, req *skillsv1.ListPro
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
-	return &skillsv1.ListProposalClustersResponse{Clusters: clusters}, nil
+	return &skillsv1.ListProposalClustersResponse{Clusters: protomap.Clusters(clusters)}, nil
 }
 
 func (s *Server) ListProposals(ctx context.Context, req *skillsv1.ListProposalsRequest) (*skillsv1.ListProposalsResponse, error) {
@@ -104,7 +105,7 @@ func (s *Server) ListProposals(ctx context.Context, req *skillsv1.ListProposalsR
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
-	return &skillsv1.ListProposalsResponse{Proposals: list}, nil
+	return &skillsv1.ListProposalsResponse{Proposals: protomap.Proposals(list)}, nil
 }
 
 func (s *Server) GetProposal(ctx context.Context, req *skillsv1.GetProposalRequest) (*skillsv1.Proposal, error) {
@@ -112,7 +113,7 @@ func (s *Server) GetProposal(ctx context.Context, req *skillsv1.GetProposalReque
 	if err != nil {
 		return nil, status.Error(codes.NotFound, err.Error())
 	}
-	return p, nil
+	return protomap.Proposal(p), nil
 }
 
 func (s *Server) GetSkillAtRef(ctx context.Context, req *skillsv1.GetSkillAtRefRequest) (*skillsv1.GetSkillResponse, error) {
@@ -120,7 +121,7 @@ func (s *Server) GetSkillAtRef(ctx context.Context, req *skillsv1.GetSkillAtRefR
 	if err != nil {
 		return nil, status.Error(codes.NotFound, err.Error())
 	}
-	return &skillsv1.GetSkillResponse{Skill: md}, nil
+	return &skillsv1.GetSkillResponse{Skill: protomap.SkillMetadata(md)}, nil
 }
 
 // SubmitProposal pushes the proposal's branch upstream and opens a GitHub
@@ -141,7 +142,7 @@ func (s *Server) SubmitProposal(ctx context.Context, req *skillsv1.SubmitProposa
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
-	return resp, nil
+	return protomap.Submission(resp), nil
 }
 
 // submit pushes a proposal and opens a pull request for it, or returns the
@@ -151,14 +152,14 @@ func (s *Server) SubmitProposal(ctx context.Context, req *skillsv1.SubmitProposa
 // explicit RPC and the auto-submit path without either one opening a second
 // pull request for the same branch. Like every other fact about a proposal,
 // the record of submission is a ref in the repository, not a row somewhere.
-func (s *Server) submit(ctx context.Context, p *skillsv1.Proposal, title, body string) (*skillsv1.SubmitProposalResponse, error) {
-	if existing, ok, err := s.proposals.Submission(p.GetBranch()); err != nil {
+func (s *Server) submit(ctx context.Context, p *proposals.Proposal, title, body string) (*proposals.Submission, error) {
+	if existing, ok, err := s.proposals.Submission(p.Branch); err != nil {
 		return nil, fmt.Errorf("checking for an existing pull request: %w", err)
 	} else if ok {
 		return existing, nil
 	}
 
-	if err := s.proposals.Push(ctx, p.GetBranch()); err != nil {
+	if err := s.proposals.Push(ctx, p.Branch); err != nil {
 		return nil, fmt.Errorf("pushing branch: %w", err)
 	}
 
@@ -172,65 +173,65 @@ func (s *Server) submit(ctx context.Context, p *skillsv1.Proposal, title, body s
 	pr, err := s.github.CreatePullRequest(ctx, githubpr.PullRequestInput{
 		Title: title,
 		Body:  body,
-		Head:  p.GetBranch(),
+		Head:  p.Branch,
 		Base:  s.baseBranch,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("opening pull request: %w", err)
 	}
 
-	if err := s.proposals.MarkSubmitted(p.GetBranch(), plumbing.NewHash(p.GetHeadSha()), pr.URL, pr.Number); err != nil {
+	if err := s.proposals.MarkSubmitted(p.Branch, plumbing.NewHash(p.HeadSHA), pr.URL, pr.Number); err != nil {
 		// The pull request exists; failing the call now would tell the
 		// caller nothing happened when something did. Log instead - the
 		// cost of a lost marker is a duplicate-PR attempt later, which
 		// GitHub itself rejects.
-		slog.Error("could not record submission marker", "branch", p.GetBranch(), "error", err)
+		slog.Error("could not record submission marker", "branch", p.Branch, "error", err)
 	}
 
-	return &skillsv1.SubmitProposalResponse{
-		PullRequestUrl:    pr.URL,
+	return &proposals.Submission{
+		PullRequestURL:    pr.URL,
 		PullRequestNumber: pr.Number,
 	}, nil
 }
 
-func defaultTitle(p *skillsv1.Proposal) string {
-	return fmt.Sprintf("skillsd: propose changes to %s (%s)", p.GetSkillName(), p.GetAgentId())
+func defaultTitle(p *proposals.Proposal) string {
+	return fmt.Sprintf("skillsd: propose changes to %s (%s)", p.SkillName, p.AgentID)
 }
 
 // defaultBody writes not just what changed, but how many independent
 // agents arrived at it and which recorded failures it claims to fix.
-func defaultBody(p *skillsv1.Proposal) string {
+func defaultBody(p *proposals.Proposal) string {
 	var b strings.Builder
 
-	fmt.Fprintf(&b, "Proposed by agent `%s` via skillsd-registry.\n\n", p.GetAgentId())
+	fmt.Fprintf(&b, "Proposed by agent `%s` via skillsd-registry.\n\n", p.AgentID)
 
-	if n := p.GetCorroboration(); n > 1 {
+	if n := p.Corroboration; n > 1 {
 		fmt.Fprintf(&b, "**Independently proposed by %d agents.** Each arrived at identical "+
-			"content without seeing the others' work:\n\n- `%s` (opened this proposal)\n", n, p.GetAgentId())
-		for _, e := range p.GetEndorsements() {
-			if !e.GetStale() {
-				fmt.Fprintf(&b, "- `%s`\n", e.GetAgentId())
+			"content without seeing the others' work:\n\n- `%s` (opened this proposal)\n", n, p.AgentID)
+		for _, e := range p.Endorsements {
+			if !e.Stale {
+				fmt.Fprintf(&b, "- `%s`\n", e.AgentID)
 			}
 		}
 		b.WriteString("\n")
 	}
 
-	if ids := p.GetMotivatingReportIds(); len(ids) > 0 {
+	if ids := p.MotivatingReportIDs; len(ids) > 0 {
 		fmt.Fprintf(&b, "Motivated by %d recorded outcome report(s): %s\n\n",
 			len(ids), "`"+strings.Join(ids, "`, `")+"`")
 	}
 
 	b.WriteString("Commits:\n")
-	for _, c := range p.GetCommits() {
-		sha := c.GetSha()
+	for _, c := range p.Commits {
+		sha := c.SHA
 		if len(sha) > 7 {
 			sha = sha[:7]
 		}
-		fmt.Fprintf(&b, "- %s: %s\n", sha, firstLine(c.GetMessage()))
+		fmt.Fprintf(&b, "- %s: %s\n", sha, firstLine(c.Message))
 	}
 
-	if p.GetSourceThreadUri() != "" {
-		fmt.Fprintf(&b, "\nSource conversation: %s\n", p.GetSourceThreadUri())
+	if p.SourceThreadURI != "" {
+		fmt.Fprintf(&b, "\nSource conversation: %s\n", p.SourceThreadURI)
 	}
 	return b.String()
 }

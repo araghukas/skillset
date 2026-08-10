@@ -4,18 +4,16 @@ import (
 	"context"
 	"strings"
 	"testing"
-
-	skillsv1 "github.com/araghukas/skillset/gen/skills/v1"
 )
 
 // propose is a terse helper for the many-agents scenarios below.
 func propose(t *testing.T, svc *Service, agent, proposalID, content string) *ProposeResult {
 	t.Helper()
-	res, err := svc.ProposeChange(context.Background(), &skillsv1.ProposeChangeRequest{
+	res, err := svc.ProposeChange(context.Background(), ProposeInput{
 		SkillName:  "frontend-design",
-		AgentId:    agent,
-		ProposalId: proposalID,
-		Files: []*skillsv1.FileChange{
+		AgentID:    agent,
+		ProposalID: proposalID,
+		Files: []FileEdit{
 			{FilePath: "SKILL.md", Content: content},
 		},
 		CommitMessage: "propose " + proposalID,
@@ -34,18 +32,18 @@ func TestIdenticalProposalsCollapseIntoOneWithEndorsements(t *testing.T) {
 	if first.Deduplicated {
 		t.Fatal("the first proposal has nothing to deduplicate against")
 	}
-	if first.Proposal.GetCorroboration() != 1 {
-		t.Fatalf("expected corroboration 1 for a lone proposal, got %d", first.Proposal.GetCorroboration())
+	if first.Proposal.Corroboration != 1 {
+		t.Fatalf("expected corroboration 1 for a lone proposal, got %d", first.Proposal.Corroboration)
 	}
 
 	second := propose(t, svc, "agent-2", "also-fix", fixed)
 	if !second.Deduplicated {
 		t.Fatal("expected the second agent's identical content to deduplicate onto the first proposal")
 	}
-	if got, want := second.Proposal.GetBranch(), first.Proposal.GetBranch(); got != want {
+	if got, want := second.Proposal.Branch, first.Proposal.Branch; got != want {
 		t.Fatalf("expected to be returned the existing proposal %q, got %q", want, got)
 	}
-	if got := second.Proposal.GetCorroboration(); got != 2 {
+	if got := second.Proposal.Corroboration; got != 2 {
 		t.Fatalf("expected corroboration 2 after one endorsement, got %d", got)
 	}
 
@@ -59,11 +57,11 @@ func TestIdenticalProposalsCollapseIntoOneWithEndorsements(t *testing.T) {
 		t.Fatalf("expected exactly 1 proposal branch after two identical proposals, got %d", len(all))
 	}
 
-	endorsements := second.Proposal.GetEndorsements()
-	if len(endorsements) != 1 || endorsements[0].GetAgentId() != "agent-2" {
+	endorsements := second.Proposal.Endorsements
+	if len(endorsements) != 1 || endorsements[0].AgentID != "agent-2" {
 		t.Fatalf("expected a single endorsement by agent-2, got %+v", endorsements)
 	}
-	if endorsements[0].GetStale() {
+	if endorsements[0].Stale {
 		t.Fatal("an endorsement of the current head should not be stale")
 	}
 }
@@ -91,8 +89,8 @@ func TestDifferentContentDoesNotDeduplicate(t *testing.T) {
 	if second.Deduplicated {
 		t.Fatal("proposals with different content must not collapse")
 	}
-	if second.Proposal.GetAgentId() != "agent-2" {
-		t.Fatalf("expected agent-2 to get its own proposal, got %q", second.Proposal.GetAgentId())
+	if second.Proposal.AgentID != "agent-2" {
+		t.Fatalf("expected agent-2 to get its own proposal, got %q", second.Proposal.AgentID)
 	}
 }
 
@@ -102,11 +100,11 @@ func TestAllowDuplicateForcesOwnBranch(t *testing.T) {
 
 	propose(t, svc, "agent-1", "fix", fixed)
 
-	res, err := svc.ProposeChange(context.Background(), &skillsv1.ProposeChangeRequest{
+	res, err := svc.ProposeChange(context.Background(), ProposeInput{
 		SkillName:      "frontend-design",
-		AgentId:        "agent-2",
-		ProposalId:     "fix",
-		Files:          []*skillsv1.FileChange{{FilePath: "SKILL.md", Content: fixed}},
+		AgentID:        "agent-2",
+		ProposalID:     "fix",
+		Files:          []FileEdit{{FilePath: "SKILL.md", Content: fixed}},
 		AllowDuplicate: true,
 	})
 	if err != nil {
@@ -115,8 +113,8 @@ func TestAllowDuplicateForcesOwnBranch(t *testing.T) {
 	if res.Deduplicated {
 		t.Fatal("allow_duplicate must bypass the dedup check")
 	}
-	if res.Proposal.GetAgentId() != "agent-2" {
-		t.Fatalf("expected agent-2's own branch, got %q", res.Proposal.GetBranch())
+	if res.Proposal.AgentID != "agent-2" {
+		t.Fatalf("expected agent-2's own branch, got %q", res.Proposal.Branch)
 	}
 }
 
@@ -127,8 +125,8 @@ func TestEndorsementGoesStaleWhenProposalAdvances(t *testing.T) {
 
 	propose(t, svc, "agent-1", "fix", fixed)
 	second := propose(t, svc, "agent-2", "also-fix", fixed)
-	if second.Proposal.GetCorroboration() != 2 {
-		t.Fatalf("precondition: expected corroboration 2, got %d", second.Proposal.GetCorroboration())
+	if second.Proposal.Corroboration != 2 {
+		t.Fatalf("precondition: expected corroboration 2, got %d", second.Proposal.Corroboration)
 	}
 
 	// agent-1 revises its proposal. agent-2 corroborated the previous
@@ -139,11 +137,11 @@ func TestEndorsementGoesStaleWhenProposalAdvances(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := p.GetCorroboration(); got != 1 {
+	if got := p.Corroboration; got != 1 {
 		t.Fatalf("expected corroboration to fall back to 1 once the proposal moved on, got %d", got)
 	}
-	if len(p.GetEndorsements()) != 1 || !p.GetEndorsements()[0].GetStale() {
-		t.Fatalf("expected the endorsement to be retained but marked stale, got %+v", p.GetEndorsements())
+	if len(p.Endorsements) != 1 || !p.Endorsements[0].Stale {
+		t.Fatalf("expected the endorsement to be retained but marked stale, got %+v", p.Endorsements)
 	}
 }
 
@@ -159,29 +157,29 @@ func TestIteratingOnOwnBranchIsNeverDeduplicated(t *testing.T) {
 	if res.Deduplicated {
 		t.Fatal("an agent iterating on its own existing branch must not be redirected onto another agent's proposal")
 	}
-	if res.Proposal.GetAgentId() != "agent-2" {
-		t.Fatalf("expected to stay on agent-2's branch, got %q", res.Proposal.GetBranch())
+	if res.Proposal.AgentID != "agent-2" {
+		t.Fatalf("expected to stay on agent-2's branch, got %q", res.Proposal.Branch)
 	}
 }
 
 func TestMotivatingReportIDsRoundTripThroughCommitTrailers(t *testing.T) {
 	svc, _ := newTestService(t, "frontend-design", validSkillMD("frontend-design", "original"))
 
-	res, err := svc.ProposeChange(context.Background(), &skillsv1.ProposeChangeRequest{
+	res, err := svc.ProposeChange(context.Background(), ProposeInput{
 		SkillName:  "frontend-design",
-		AgentId:    "agent-1",
-		ProposalId: "fix",
-		Files: []*skillsv1.FileChange{
+		AgentID:    "agent-1",
+		ProposalID: "fix",
+		Files: []FileEdit{
 			{FilePath: "SKILL.md", Content: validSkillMD("frontend-design", "fixed")},
 		},
 		CommitMessage:       "fix the thing",
-		MotivatingReportIds: []string{"report-aaa", "report-bbb"},
+		MotivatingReportIDs: []string{"report-aaa", "report-bbb"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	got := res.Proposal.GetMotivatingReportIds()
+	got := res.Proposal.MotivatingReportIDs
 	if len(got) != 2 || got[0] != "report-aaa" || got[1] != "report-bbb" {
 		t.Fatalf("expected both report IDs to survive the round trip, got %v", got)
 	}
@@ -192,11 +190,11 @@ func TestProposeChangeRejectsSlashesInIdentifiers(t *testing.T) {
 
 	// A slash here would make the branch name and its endorsement refs
 	// ambiguous to parse back.
-	_, err := svc.ProposeChange(context.Background(), &skillsv1.ProposeChangeRequest{
+	_, err := svc.ProposeChange(context.Background(), ProposeInput{
 		SkillName:  "frontend-design",
-		AgentId:    "team/agent-1",
-		ProposalId: "fix",
-		Files: []*skillsv1.FileChange{
+		AgentID:    "team/agent-1",
+		ProposalID: "fix",
+		Files: []FileEdit{
 			{FilePath: "SKILL.md", Content: validSkillMD("frontend-design", "fixed")},
 		},
 	})
@@ -230,18 +228,18 @@ func TestClusteringGroupsOverlappingEditsAndSeparatesDistantOnes(t *testing.T) {
 	}
 
 	c := clusters[0]
-	if len(c.GetProposals()) != 2 {
-		t.Fatalf("expected the two competing top-line proposals to cluster, got %d", len(c.GetProposals()))
+	if len(c.Proposals) != 2 {
+		t.Fatalf("expected the two competing top-line proposals to cluster, got %d", len(c.Proposals))
 	}
-	if c.GetDistinctAgents() != 2 {
-		t.Fatalf("expected 2 distinct agents in the cluster, got %d", c.GetDistinctAgents())
+	if c.DistinctAgents != 2 {
+		t.Fatalf("expected 2 distinct agents in the cluster, got %d", c.DistinctAgents)
 	}
-	if len(c.GetContestedPaths()) != 1 || !strings.HasSuffix(c.GetContestedPaths()[0], "SKILL.md") {
-		t.Fatalf("expected SKILL.md to be reported as contested, got %v", c.GetContestedPaths())
+	if len(c.ContestedPaths) != 1 || !strings.HasSuffix(c.ContestedPaths[0], "SKILL.md") {
+		t.Fatalf("expected SKILL.md to be reported as contested, got %v", c.ContestedPaths)
 	}
 
-	for _, p := range c.GetProposals() {
-		if p.GetAgentId() == "agent-3" {
+	for _, p := range c.Proposals {
+		if p.AgentID == "agent-3" {
 			t.Fatal("the unrelated edit must not be pulled into the contested cluster")
 		}
 	}
@@ -254,7 +252,7 @@ func TestClusteringGroupsOverlappingEditsAndSeparatesDistantOnes(t *testing.T) {
 	if len(withSingletons) != 2 {
 		t.Fatalf("expected 2 clusters when singletons are included, got %d", len(withSingletons))
 	}
-	if withSingletons[0].GetDistinctAgents() < withSingletons[1].GetDistinctAgents() {
+	if withSingletons[0].DistinctAgents < withSingletons[1].DistinctAgents {
 		t.Fatal("expected clusters to be sorted most-corroborated first")
 	}
 }

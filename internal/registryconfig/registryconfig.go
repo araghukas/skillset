@@ -84,7 +84,7 @@ type Config struct {
 	// identities, one misbehaving caller can manufacture a threshold's
 	// worth of agreement by itself. Enable it once callers are
 	// authenticated, not before.
-	AutoSubmitEndorsements int32
+	AutoSubmitEndorsements int
 
 	// FetchInterval is how often the base branch is re-fetched from
 	// origin in the background.
@@ -208,7 +208,7 @@ func Load() (Config, error) {
 		GitHubOwner:             getenv("GITHUB_OWNER", ""),
 		GitHubRepo:              getenv("GITHUB_REPO", ""),
 		GitHubAPIBaseURL:        getenv("GITHUB_API_BASE_URL", "https://api.github.com"),
-		AutoSubmitEndorsements:  int32(autoSubmitEndorsements),
+		AutoSubmitEndorsements:  autoSubmitEndorsements,
 		FetchInterval:           fetchInterval,
 		EvidenceEnabled:         evidenceEnabled,
 		EvidenceDBPath:          getenv("EVIDENCE_DB_PATH", "/var/lib/skillsd-evidence/evidence.db"),

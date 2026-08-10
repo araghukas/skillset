@@ -5,10 +5,11 @@ import (
 
 	skillsv1 "github.com/araghukas/skillset/gen/skills/v1"
 	"github.com/araghukas/skillset/internal/clientguide"
+	"github.com/araghukas/skillset/internal/protomap"
 	"github.com/araghukas/skillset/internal/registry"
+	"github.com/araghukas/skillset/internal/skill"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -28,10 +29,10 @@ func (s *Server) ListSkills(ctx context.Context, req *skillsv1.ListSkillsRequest
 	skills := s.reg.List()
 	out := make([]*skillsv1.SkillMetadata, 0, len(skills))
 	for _, sk := range skills {
-		if category := req.GetCategory(); category != "" && sk.Metadata.GetMetadata()["category"] != category {
+		if category := req.GetCategory(); category != "" && sk.Metadata.Metadata["category"] != category {
 			continue
 		}
-		out = append(out, metadataFor(sk, req.GetIncludeContextFiles()))
+		out = append(out, protomap.SkillMetadata(metadataFor(sk, req.GetIncludeContextFiles())))
 	}
 	return &skillsv1.ListSkillsResponse{
 		Skills:    out,
@@ -44,21 +45,19 @@ func (s *Server) GetSkill(ctx context.Context, req *skillsv1.GetSkillRequest) (*
 	if !ok {
 		return nil, status.Errorf(codes.NotFound, "skill %q not found", req.GetSkillName())
 	}
-	return &skillsv1.GetSkillResponse{Skill: metadataFor(sk, req.GetIncludeContextFiles())}, nil
+	return &skillsv1.GetSkillResponse{Skill: protomap.SkillMetadata(metadataFor(sk, req.GetIncludeContextFiles()))}, nil
 }
 
 func (s *Server) GetClientGuide(ctx context.Context, req *skillsv1.GetClientGuideRequest) (*skillsv1.GetSkillResponse, error) {
-	return &skillsv1.GetSkillResponse{Skill: clientguide.Guide}, nil
+	return &skillsv1.GetSkillResponse{Skill: protomap.SkillMetadata(clientguide.Guide)}, nil
 }
 
 // metadataFor returns sk's metadata, stripped of context files unless the
 // caller asked for them. The registry's copy is shared across concurrent
-// requests, so a clone is made before mutating rather than trimming in place.
-func metadataFor(sk *registry.Skill, includeContextFiles bool) *skillsv1.SkillMetadata {
+// requests, so a copy is made before trimming rather than trimming in place.
+func metadataFor(sk *registry.Skill, includeContextFiles bool) *skill.Metadata {
 	if includeContextFiles {
 		return sk.Metadata
 	}
-	md := proto.Clone(sk.Metadata).(*skillsv1.SkillMetadata)
-	md.ContextFiles = nil
-	return md
+	return sk.Metadata.WithoutContextFiles()
 }

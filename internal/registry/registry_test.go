@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	skillsv1 "github.com/araghukas/skillset/gen/skills/v1"
 	"github.com/araghukas/skillset/internal/skillparse"
 	"github.com/araghukas/skillset/internal/storage"
 )
@@ -90,9 +89,9 @@ func TestLoadWithoutPrefix(t *testing.T) {
 }
 
 // TestLoadSkipsNonUTF8ContextFiles is a regression test for a crash where a
-// binary asset (e.g. an image) alongside SKILL.md broke gRPC marshaling,
-// since SkillContextFile.content is a proto3 string field and must be valid
-// UTF-8. Non-UTF-8 files should be skipped, not fail the whole skill.
+// binary asset (e.g. an image) alongside SKILL.md broke serialization, since
+// ContextFile.Content is carried as a JSON string and must be valid UTF-8.
+// Non-UTF-8 files should be skipped, not fail the whole skill.
 func TestLoadSkipsNonUTF8ContextFiles(t *testing.T) {
 	root := t.TempDir()
 	writeSkill(t, root, "with-binary-asset", "---\nname: with-binary-asset\ndescription: has an image\n---\nbody\n")
@@ -156,30 +155,22 @@ func TestLoadAppendsOnboardingFooterToSkillMd(t *testing.T) {
 		t.Fatal("expected to find frontend-design skill")
 	}
 
-	var skillMD, notes *skillsv1.SkillContextFile
-	for _, cf := range sk.Metadata.ContextFiles {
-		switch cf.FilePath {
-		case skillparse.SkillFileName:
-			skillMD = cf
-		case "references/notes.txt":
-			notes = cf
-		}
-	}
-
-	if skillMD == nil {
+	skillMD, ok := sk.Metadata.ContextFile(skillparse.SkillFileName)
+	if !ok {
 		t.Fatal("expected a SKILL.md context file")
 	}
-	if !strings.Contains(skillMD.Content, "ProposeChange") {
+	if !strings.Contains(skillMD.Content, "propose_change") {
 		t.Fatalf("expected SKILL.md content to carry the onboarding footer, got: %q", skillMD.Content)
 	}
 	if !strings.HasPrefix(skillMD.Content, "---\nname: frontend-design") {
 		t.Fatalf("expected original SKILL.md content to be preserved before the footer, got: %q", skillMD.Content)
 	}
 
-	if notes == nil {
+	notes, ok := sk.Metadata.ContextFile("references/notes.txt")
+	if !ok {
 		t.Fatal("expected a references/notes.txt context file")
 	}
-	if strings.Contains(notes.Content, "ProposeChange") {
+	if strings.Contains(notes.Content, "propose_change") {
 		t.Fatalf("expected the onboarding footer to be appended only to SKILL.md, not to supporting files, got: %q", notes.Content)
 	}
 }
