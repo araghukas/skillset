@@ -15,12 +15,25 @@ import (
 const (
 	defaultGRPCMaxRecvMsgSizeBytes = 8 << 20 // 8 MiB
 	defaultGRPCMaxSendMsgSizeBytes = 8 << 20 // 8 MiB
+
+	// defaultMaxRequestBodyBytes applies when MCP_MAX_REQUEST_BODY_BYTES is
+	// unset. skillsd's own requests (ListSkills, GetSkill) are small; this
+	// mainly guards against an oversized request rather than a legitimate
+	// large one.
+	defaultMaxRequestBodyBytes = 8 << 20 // 8 MiB
 )
 
 // Config holds runtime configuration loaded from the environment.
 type Config struct {
 	// GRPCAddr is the address the gRPC server listens on, e.g. ":8080".
 	GRPCAddr string
+
+	// MCPAddr is the address the MCP server listens on over Streamable
+	// HTTP. Empty (the default) skips MCP serving entirely.
+	MCPAddr string
+
+	// MaxRequestBodyBytes caps a single incoming MCP request body.
+	MaxRequestBodyBytes int64
 
 	// SkillsDir is the local directory that skill definitions are read
 	// from. It is expected to be a volume populated by a git-clone init
@@ -70,9 +83,15 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("parsing GRPC_MAX_SEND_MSG_SIZE_BYTES: %w", err)
 	}
+	maxRequestBodyBytes, err := getenvInt("MCP_MAX_REQUEST_BODY_BYTES", defaultMaxRequestBodyBytes)
+	if err != nil {
+		return Config{}, fmt.Errorf("parsing MCP_MAX_REQUEST_BODY_BYTES: %w", err)
+	}
 
 	cfg := Config{
 		GRPCAddr:                getenv("GRPC_ADDR", ":8080"),
+		MCPAddr:                 getenv("MCP_ADDR", ""),
+		MaxRequestBodyBytes:     int64(maxRequestBodyBytes),
 		SkillsDir:               getenv("SKILLS_DIR", "/skills"),
 		SkillsSubPath:           getenv("SKILLS_SUBPATH", ""),
 		SkillsCommit:            getenv("SKILLS_COMMIT", ""),

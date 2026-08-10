@@ -23,12 +23,28 @@ import (
 const (
 	defaultGRPCMaxRecvMsgSizeBytes = 8 << 20 // 8 MiB
 	defaultGRPCMaxSendMsgSizeBytes = 8 << 20 // 8 MiB
+
+	// defaultMaxRequestBodyBytes applies when MCP_MAX_REQUEST_BODY_BYTES is
+	// unset. It bounds one incoming MCP request body - the whole
+	// propose_change call, including every file. The SDK's own default is
+	// 4 MiB; this is raised for the same reason the gRPC default was.
+	defaultMaxRequestBodyBytes = 8 << 20 // 8 MiB
 )
 
 // Config holds runtime configuration loaded from the environment.
 type Config struct {
 	// GRPCAddr is the address the ProposalService gRPC server listens on.
 	GRPCAddr string
+
+	// MCPAddr is the address the MCP server listens on over Streamable
+	// HTTP. Empty (the default) skips MCP serving entirely. Both this and
+	// GRPCAddr can be set at once during the migration to MCP;
+	// skillsd-registry runs both listeners against the same underlying
+	// services.
+	MCPAddr string
+
+	// MaxRequestBodyBytes caps a single incoming MCP request body.
+	MaxRequestBodyBytes int64
 
 	// RepoDir is the local directory the git working copy is kept in. It's
 	// expected to be a persistent volume: unlike skillsd's read-only
@@ -163,6 +179,10 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("parsing MAX_FILE_CONTENT_BYTES: %w", err)
 	}
+	maxRequestBodyBytes, err := getenvInt("MCP_MAX_REQUEST_BODY_BYTES", defaultMaxRequestBodyBytes)
+	if err != nil {
+		return Config{}, fmt.Errorf("parsing MCP_MAX_REQUEST_BODY_BYTES: %w", err)
+	}
 	submitProposalRequested, err := getenvBool("SUBMIT_PROPOSAL_ENABLED", true)
 	if err != nil {
 		return Config{}, fmt.Errorf("parsing SUBMIT_PROPOSAL_ENABLED: %w", err)
@@ -199,6 +219,8 @@ func Load() (Config, error) {
 
 	cfg := Config{
 		GRPCAddr:                getenv("GRPC_ADDR", ":8081"),
+		MCPAddr:                 getenv("MCP_ADDR", ""),
+		MaxRequestBodyBytes:     int64(maxRequestBodyBytes),
 		RepoDir:                 getenv("REPO_DIR", "/var/lib/skillsd-registry"),
 		SkillsRepoURL:           getenv("SKILLS_REPO_URL", ""),
 		SkillsRepoBaseBranch:    getenv("SKILLS_REPO_BASE_BRANCH", "main"),

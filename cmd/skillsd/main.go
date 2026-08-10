@@ -10,16 +10,24 @@ import (
 	"syscall"
 
 	skillsv1 "github.com/araghukas/skillset/gen/skills/v1"
+	"github.com/araghukas/skillset/internal/clientguide"
 	"github.com/araghukas/skillset/internal/config"
 	"github.com/araghukas/skillset/internal/gitrev"
+	"github.com/araghukas/skillset/internal/mcphttp"
 	"github.com/araghukas/skillset/internal/registry"
 	"github.com/araghukas/skillset/internal/server"
+	"github.com/araghukas/skillset/internal/skilltools"
 	"github.com/araghukas/skillset/internal/storage"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
 )
+
+// version is stamped at build time; unset in `go run`/`go test` builds.
+var version = "dev"
 
 func main() {
 	if err := run(); err != nil {
@@ -51,6 +59,22 @@ func run() error {
 	}
 	slog.Info("loaded skill index", "count", count)
 
+	group, gctx := errgroup.WithContext(ctx)
+
+	if cfg.GRPCAddr != "" {
+		group.Go(func() error { return serveGRPC(gctx, cfg, reg) })
+	}
+	if cfg.MCPAddr != "" {
+		group.Go(func() error { return serveMCP(gctx, cfg, reg) })
+	}
+	if cfg.GRPCAddr == "" && cfg.MCPAddr == "" {
+		return fmt.Errorf("neither GRPC_ADDR nor MCP_ADDR is set; at least one transport must be enabled")
+	}
+
+	return group.Wait()
+}
+
+func serveGRPC(ctx context.Context, cfg config.Config, reg *registry.Registry) error {
 	healthSrv := health.NewServer()
 	healthSrv.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
 
@@ -69,12 +93,32 @@ func run() error {
 
 	go func() {
 		<-ctx.Done()
-		slog.Info("shutdown signal received, draining connections")
+		slog.Info("shutdown signal received, draining gRPC connections")
 		grpcServer.GracefulStop()
 	}()
 
-	slog.Info("skillsd listening", "addr", cfg.GRPCAddr)
+	slog.Info("skillsd listening (gRPC)", "addr", cfg.GRPCAddr)
 	return grpcServer.Serve(lis)
+}
+
+// serveMCP runs the MCP server alongside gRPC. It shares the same
+// registry, so both transports serve an identical view of the skill index.
+func serveMCP(ctx context.Context, cfg config.Config, reg *registry.Registry) error {
+	srv := mcp.NewServer(
+		&mcp.Implementation{Name: "skillsd", Version: version},
+		&mcp.ServerOptions{
+			Instructions: clientguide.Instructions("skillsd"),
+			// Suppress the SDK's default advertisement of a "logging"
+			// capability, which this server does not implement.
+			Capabilities: &mcp.ServerCapabilities{},
+		},
+	)
+	skilltools.Add(srv, reg)
+
+	return mcphttp.Serve(ctx, srv, mcphttp.Options{
+		Addr:                cfg.MCPAddr,
+		MaxRequestBodyBytes: cfg.MaxRequestBodyBytes,
+	})
 }
 
 // resolveCommit determines the revision to stamp onto every served skill:

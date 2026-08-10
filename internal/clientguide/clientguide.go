@@ -41,6 +41,22 @@ func mustLoad() *skill.Metadata {
 	return md
 }
 
+// Instructions returns the guide text to send as an MCP server's
+// ServerOptions.Instructions for the given component ("skillsd" or
+// "registry").
+//
+// TODO(mcp-refactor commit 6): this returns the whole guide unfiltered for
+// both components. The guide will be split into HTML-comment-delimited
+// sections per component, so skillsd doesn't advertise proposal-workflow
+// instructions it has no tools for.
+func Instructions(component string) string {
+	cf, ok := Guide.ContextFile("SKILL.md")
+	if !ok {
+		return ""
+	}
+	return cf.Content
+}
+
 // embedBackend is a minimal storage.Backend over an embed.FS, just enough
 // to feed this package's single embedded skill through skillparse.Load.
 type embedBackend struct {

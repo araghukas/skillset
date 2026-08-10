@@ -16,6 +16,7 @@ import (
 	"github.com/araghukas/skillset/internal/githubpr"
 	"github.com/araghukas/skillset/internal/gitrepo"
 	"github.com/araghukas/skillset/internal/proposals"
+	"github.com/araghukas/skillset/internal/submit"
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"google.golang.org/grpc/codes"
@@ -244,7 +245,7 @@ func TestAutoSubmitFiresOnlyOnceTheThresholdIsReached(t *testing.T) {
 	ctx := context.Background()
 
 	var prCalls int
-	s.github = githubpr.New(countingGitHub(t, &prCalls).URL, "acme", "skills", githubauth.Static("test-token"))
+	s.submitter = submit.New(s.proposals, githubpr.New(countingGitHub(t, &prCalls).URL, "acme", "skills", githubauth.Static("test-token")), "main")
 	s.autoSubmitThreshold = 2
 
 	fixed := validSkillMD("frontend-design", "the corrected description")
@@ -305,7 +306,7 @@ func TestAutoSubmitDisabledByDefault(t *testing.T) {
 	ctx := context.Background()
 
 	var prCalls int
-	s.github = githubpr.New(countingGitHub(t, &prCalls).URL, "acme", "skills", githubauth.Static("test-token"))
+	s.submitter = submit.New(s.proposals, githubpr.New(countingGitHub(t, &prCalls).URL, "acme", "skills", githubauth.Static("test-token")), "main")
 
 	fixed := validSkillMD("frontend-design", "the corrected description")
 	for _, agent := range []string{"agent-1", "agent-2", "agent-3"} {

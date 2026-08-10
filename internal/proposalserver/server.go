@@ -5,15 +5,13 @@ package proposalserver
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
-	"strings"
 
 	skillsv1 "github.com/araghukas/skillset/gen/skills/v1"
 	"github.com/araghukas/skillset/internal/githubpr"
 	"github.com/araghukas/skillset/internal/proposals"
 	"github.com/araghukas/skillset/internal/protomap"
-	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/araghukas/skillset/internal/submit"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -24,7 +22,7 @@ type Server struct {
 	skillsv1.UnimplementedProposalServiceServer
 
 	proposals             *proposals.Service
-	github                *githubpr.Client
+	submitter             *submit.Submitter
 	baseBranch            string
 	submitProposalEnabled bool
 	autoSubmitThreshold   int
@@ -44,7 +42,7 @@ type Server struct {
 func New(svc *proposals.Service, gh *githubpr.Client, baseBranch string, submitProposalEnabled bool, autoSubmitThreshold int) *Server {
 	return &Server{
 		proposals:             svc,
-		github:                gh,
+		submitter:             submit.New(svc, gh, baseBranch),
 		baseBranch:            baseBranch,
 		submitProposalEnabled: submitProposalEnabled,
 		autoSubmitThreshold:   autoSubmitThreshold,
@@ -80,7 +78,7 @@ func (s *Server) maybeAutoSubmit(ctx context.Context, p *proposals.Proposal) *sk
 		return nil
 	}
 
-	submitted, err := s.submit(ctx, p, "", "")
+	submitted, err := s.submitter.Submit(ctx, p, "", "")
 	if err != nil {
 		slog.Error("auto-submit failed; proposal is still submittable by hand",
 			"branch", p.Branch, "corroboration", p.Corroboration, "error", err)
@@ -138,107 +136,9 @@ func (s *Server) SubmitProposal(ctx context.Context, req *skillsv1.SubmitProposa
 		return nil, status.Error(codes.NotFound, err.Error())
 	}
 
-	resp, err := s.submit(ctx, p, req.GetPrTitle(), req.GetPrBody())
+	resp, err := s.submitter.Submit(ctx, p, req.GetPrTitle(), req.GetPrBody())
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 	return protomap.Submission(resp), nil
-}
-
-// submit pushes a proposal and opens a pull request for it, or returns the
-// pull request it already has.
-//
-// The already-submitted check is what makes this callable from both the
-// explicit RPC and the auto-submit path without either one opening a second
-// pull request for the same branch. Like every other fact about a proposal,
-// the record of submission is a ref in the repository, not a row somewhere.
-func (s *Server) submit(ctx context.Context, p *proposals.Proposal, title, body string) (*proposals.Submission, error) {
-	if existing, ok, err := s.proposals.Submission(p.Branch); err != nil {
-		return nil, fmt.Errorf("checking for an existing pull request: %w", err)
-	} else if ok {
-		return existing, nil
-	}
-
-	if err := s.proposals.Push(ctx, p.Branch); err != nil {
-		return nil, fmt.Errorf("pushing branch: %w", err)
-	}
-
-	if title == "" {
-		title = defaultTitle(p)
-	}
-	if body == "" {
-		body = defaultBody(p)
-	}
-
-	pr, err := s.github.CreatePullRequest(ctx, githubpr.PullRequestInput{
-		Title: title,
-		Body:  body,
-		Head:  p.Branch,
-		Base:  s.baseBranch,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("opening pull request: %w", err)
-	}
-
-	if err := s.proposals.MarkSubmitted(p.Branch, plumbing.NewHash(p.HeadSHA), pr.URL, pr.Number); err != nil {
-		// The pull request exists; failing the call now would tell the
-		// caller nothing happened when something did. Log instead - the
-		// cost of a lost marker is a duplicate-PR attempt later, which
-		// GitHub itself rejects.
-		slog.Error("could not record submission marker", "branch", p.Branch, "error", err)
-	}
-
-	return &proposals.Submission{
-		PullRequestURL:    pr.URL,
-		PullRequestNumber: pr.Number,
-	}, nil
-}
-
-func defaultTitle(p *proposals.Proposal) string {
-	return fmt.Sprintf("skillsd: propose changes to %s (%s)", p.SkillName, p.AgentID)
-}
-
-// defaultBody writes not just what changed, but how many independent
-// agents arrived at it and which recorded failures it claims to fix.
-func defaultBody(p *proposals.Proposal) string {
-	var b strings.Builder
-
-	fmt.Fprintf(&b, "Proposed by agent `%s` via skillsd-registry.\n\n", p.AgentID)
-
-	if n := p.Corroboration; n > 1 {
-		fmt.Fprintf(&b, "**Independently proposed by %d agents.** Each arrived at identical "+
-			"content without seeing the others' work:\n\n- `%s` (opened this proposal)\n", n, p.AgentID)
-		for _, e := range p.Endorsements {
-			if !e.Stale {
-				fmt.Fprintf(&b, "- `%s`\n", e.AgentID)
-			}
-		}
-		b.WriteString("\n")
-	}
-
-	if ids := p.MotivatingReportIDs; len(ids) > 0 {
-		fmt.Fprintf(&b, "Motivated by %d recorded outcome report(s): %s\n\n",
-			len(ids), "`"+strings.Join(ids, "`, `")+"`")
-	}
-
-	b.WriteString("Commits:\n")
-	for _, c := range p.Commits {
-		sha := c.SHA
-		if len(sha) > 7 {
-			sha = sha[:7]
-		}
-		fmt.Fprintf(&b, "- %s: %s\n", sha, firstLine(c.Message))
-	}
-
-	if p.SourceThreadURI != "" {
-		fmt.Fprintf(&b, "\nSource conversation: %s\n", p.SourceThreadURI)
-	}
-	return b.String()
-}
-
-// firstLine keeps commit trailers (Source-Thread, Motivated-By) out of the
-// bulleted commit list, where they'd repeat what the sections above say.
-func firstLine(s string) string {
-	line, _, _ := strings.Cut(strings.TrimSpace(s), "\n")
-	return line
 }

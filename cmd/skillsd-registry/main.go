@@ -12,18 +12,28 @@ import (
 	"time"
 
 	skillsv1 "github.com/araghukas/skillset/gen/skills/v1"
+	"github.com/araghukas/skillset/internal/clientguide"
 	"github.com/araghukas/skillset/internal/evidence"
 	"github.com/araghukas/skillset/internal/evidenceserver"
+	"github.com/araghukas/skillset/internal/evidencetools"
 	"github.com/araghukas/skillset/internal/githubpr"
 	"github.com/araghukas/skillset/internal/gitrepo"
+	"github.com/araghukas/skillset/internal/mcphttp"
 	"github.com/araghukas/skillset/internal/proposals"
 	"github.com/araghukas/skillset/internal/proposalserver"
+	"github.com/araghukas/skillset/internal/proposaltools"
 	"github.com/araghukas/skillset/internal/registryconfig"
+	"github.com/araghukas/skillset/internal/submit"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
 )
+
+// version is stamped at build time; unset in `go run`/`go test` builds.
+var version = "dev"
 
 func main() {
 	if err := run(); err != nil {
@@ -66,6 +76,41 @@ func run() error {
 
 	go refreshBaseLoop(ctx, repo, cfg.FetchInterval)
 
+	submitter := submit.New(svc, gh, cfg.SkillsRepoBaseBranch)
+
+	// EvidenceService is optional: without it the registry is still a
+	// complete proposal path, just one whose pull requests arrive without
+	// the field data that motivated them.
+	var store *evidence.Store
+	if cfg.EvidenceEnabled {
+		store, err = openEvidence(ctx, cfg)
+		if err != nil {
+			return err
+		}
+		defer store.Close()
+
+		go retentionLoop(ctx, store, cfg.EvidenceRollupInterval, cfg.EvidenceRetention)
+		go backupLoop(ctx, store, cfg.EvidenceBackupPath, cfg.EvidenceBackupInterval)
+	} else {
+		slog.Info("evidence collection is disabled; no outcome reports will be collected")
+	}
+
+	group, gctx := errgroup.WithContext(ctx)
+
+	if cfg.GRPCAddr != "" {
+		group.Go(func() error { return serveGRPC(gctx, cfg, svc, gh, store) })
+	}
+	if cfg.MCPAddr != "" {
+		group.Go(func() error { return serveMCP(gctx, cfg, svc, submitter, store) })
+	}
+	if cfg.GRPCAddr == "" && cfg.MCPAddr == "" {
+		return fmt.Errorf("neither GRPC_ADDR nor MCP_ADDR is set; at least one transport must be enabled")
+	}
+
+	return group.Wait()
+}
+
+func serveGRPC(ctx context.Context, cfg registryconfig.Config, svc *proposals.Service, gh *githubpr.Client, store *evidence.Store) error {
 	healthSrv := health.NewServer()
 	healthSrv.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
 
@@ -80,37 +125,52 @@ func run() error {
 	)
 	skillsv1.RegisterProposalServiceServer(grpcServer, proposalserver.New(
 		svc, gh, cfg.SkillsRepoBaseBranch, cfg.SubmitProposalEnabled, cfg.AutoSubmitEndorsements))
-
-	// EvidenceService is optional: without it the registry is still a
-	// complete proposal path, just one whose pull requests arrive without
-	// the field data that motivated them.
-	if cfg.EvidenceEnabled {
-		store, err := openEvidence(ctx, cfg)
-		if err != nil {
-			return err
-		}
-		defer store.Close()
-
+	if store != nil {
 		skillsv1.RegisterEvidenceServiceServer(grpcServer,
 			evidenceserver.New(store, svc, cfg.EvidenceVerifyCommits))
-
-		go retentionLoop(ctx, store, cfg.EvidenceRollupInterval, cfg.EvidenceRetention)
-		go backupLoop(ctx, store, cfg.EvidenceBackupPath, cfg.EvidenceBackupInterval)
-	} else {
-		slog.Info("EvidenceService is disabled; no outcome reports will be collected")
 	}
-
 	grpc_health_v1.RegisterHealthServer(grpcServer, healthSrv)
 	reflection.Register(grpcServer)
 
 	go func() {
 		<-ctx.Done()
-		slog.Info("shutdown signal received, draining connections")
+		slog.Info("shutdown signal received, draining gRPC connections")
 		grpcServer.GracefulStop()
 	}()
 
-	slog.Info("skillsd-registry listening", "addr", cfg.GRPCAddr)
+	slog.Info("skillsd-registry listening (gRPC)", "addr", cfg.GRPCAddr)
 	return grpcServer.Serve(lis)
+}
+
+// serveMCP runs the MCP server alongside gRPC. It shares the same
+// proposals.Service, submit.Submitter, and (if enabled) evidence.Store, so
+// every transport serves an identical view of the registry's state.
+func serveMCP(ctx context.Context, cfg registryconfig.Config, svc *proposals.Service, submitter *submit.Submitter, store *evidence.Store) error {
+	srv := mcp.NewServer(
+		&mcp.Implementation{Name: "skillsd-registry", Version: version},
+		&mcp.ServerOptions{
+			Instructions: clientguide.Instructions("registry"),
+			Capabilities: &mcp.ServerCapabilities{},
+		},
+	)
+	proposaltools.Add(srv, proposaltools.Deps{
+		Proposals:           svc,
+		Submitter:           submitter,
+		SubmitEnabled:       cfg.SubmitProposalEnabled,
+		AutoSubmitThreshold: cfg.AutoSubmitEndorsements,
+	})
+	if store != nil {
+		evidencetools.Add(srv, evidencetools.Deps{
+			Store:    store,
+			Resolver: svc,
+			Verify:   cfg.EvidenceVerifyCommits,
+		})
+	}
+
+	return mcphttp.Serve(ctx, srv, mcphttp.Options{
+		Addr:                cfg.MCPAddr,
+		MaxRequestBodyBytes: cfg.MaxRequestBodyBytes,
+	})
 }
 
 // openEvidence opens the outcome-report database, creating its parent
