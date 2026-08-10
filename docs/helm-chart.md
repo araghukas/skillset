@@ -84,7 +84,7 @@ Both components authenticate the same way — an HTTPS clone URL plus a credenti
 | Needs | `git clone` only | `git push` **and** the GitHub REST API (PR creation) |
 | Values | `skillsRepo.githubApp.*` / `skillsRepo.tokenSecret` | `registry.github.githubApp.*` / `registry.github.tokenSecret` |
 | Minimum permissions | `Contents: Read` | `Contents: Read and write` + `Pull requests: Read and write` |
-| If unset | Fine for a public repo — no auth needed | Runs propose-only: `ProposeChange`/`GetProposal`/etc. still work, `SubmitProposal` is disabled |
+| If unset | Fine for a public repo — no auth needed | Runs propose-only: `propose_change`/`get_proposal`/etc. still work, `submit_proposal` is disabled |
 
 The chart itself enforces no scoping: it passes each component whatever
 credential you name, and every permission boundary lives on GitHub's side, in
@@ -146,9 +146,10 @@ For local dev, the Tiltfile creates them for you from gitignored files; see
 |---|---|---|---|
 | `replicaCount` | `2` | — | Read-fleet replica count |
 | `image.repository` / `.tag` | `skillsd` / `latest` | — | Image for the `skillsd` container |
-| `grpcAddr` | `:8080` | `GRPC_ADDR` | gRPC listen address |
+| `httpAddr` | `:8080` | `HTTP_ADDR` | MCP (Streamable HTTP) listen address |
 | `logLevel` | `info` | `LOG_LEVEL` | Minimum slog level |
-| `grpcMaxRecvMsgSizeMiB` / `grpcMaxSendMsgSizeMiB` | `8` / `8` | `GRPC_MAX_{RECV,SEND}_MSG_SIZE_BYTES` | Per-message gRPC size caps |
+| `maxRequestBodyMiB` | `8` | `MAX_REQUEST_BODY_BYTES` | Cap on a single incoming MCP request body |
+| `maxResultKiB` | `256` | `MAX_RESULT_BYTES` | Cap on context-file bytes a single `get_skill` call returns — note the unit is **KiB**, not MiB |
 | `service.type` / `.port` | `ClusterIP` / `8080` | — | `skillsd`'s Service |
 | `skillsRepo.url` | `""` | `SKILLS_REPO_URL` (init container) | HTTPS clone URL |
 | `skillsRepo.branch` | `main` | `SKILLS_REPO_BRANCH` (init container) | Branch shallow-cloned (depth 1) |
@@ -168,10 +169,11 @@ For local dev, the Tiltfile creates them for you from gitignored files; see
 |---|---|---|---|
 | `registry.enabled` | `true` | — | Renders the registry's Deployment/Service/PVCs at all |
 | `registry.image.repository` / `.tag` | `skillsd` / `latest` | — | Same image, different entrypoint (`/skillsd-registry`) |
-| `registry.grpcAddr` | `:8081` | `GRPC_ADDR` | gRPC listen address |
+| `registry.httpAddr` | `:8081` | `HTTP_ADDR` | MCP (Streamable HTTP) listen address |
 | `registry.service.type` / `.port` | `ClusterIP` / `8081` | — | Registry's Service |
 | `registry.fetchInterval` | `5m` | `FETCH_INTERVAL` | Background re-fetch of the base branch |
-| `registry.grpcMaxRecvMsgSizeMiB` / `.grpcMaxSendMsgSizeMiB` | `8` / `8` | `GRPC_MAX_{RECV,SEND}_MSG_SIZE_BYTES` | Per-message gRPC size caps |
+| `registry.maxRequestBodyMiB` | `8` | `MAX_REQUEST_BODY_BYTES` | Cap on a single incoming MCP request body (a whole `propose_change` call) |
+| `registry.maxResultKiB` | `256` | `MAX_RESULT_BYTES` | Cap on bytes a single `get_skill_at_ref` or `get_proposal` call returns — **KiB**, not MiB |
 | `registry.maxFileContentSizeMiB` | `1` | `MAX_FILE_CONTENT_BYTES` | Cap on a single proposed file's content |
 | `registry.repoDir` | `/var/lib/skillsd-registry` | `REPO_DIR` | Working copy path (on `repo-data`) |
 | `registry.persistence.size` / `.storageClassName` | `1Gi` / `""` | — | `repo-data` PVC sizing |
@@ -192,7 +194,7 @@ For local dev, the Tiltfile creates them for you from gitignored files; see
 
 | Value | Default | Env var | Description |
 |---|---|---|---|
-| `registry.evidence.enabled` | `true` | `EVIDENCE_ENABLED` | Serves `EvidenceService` at all |
+| `registry.evidence.enabled` | `true` | `EVIDENCE_ENABLED` | Registers the evidence tools (`report_outcome`, `list_skill_signals`, `list_outcome_reports`) at all — disabled, they're absent from `tools/list` |
 | `registry.evidence.dbPath` | `/var/lib/skillsd-evidence/evidence.db` | `EVIDENCE_DB_PATH` | SQLite file, on `evidence-data` |
 | `registry.evidence.verifyCommits` | `true` | `EVIDENCE_VERIFY_COMMITS` | Reject reports naming a skill/commit the repo doesn't contain |
 | `registry.evidence.retention` | `2160h` (90d) | `EVIDENCE_RETENTION` | Age at which raw reports roll up into aggregates and are deleted; `0` disables |

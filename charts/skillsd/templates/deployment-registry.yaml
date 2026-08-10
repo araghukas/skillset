@@ -61,10 +61,10 @@ spec:
           command: ["/skillsd-registry"]
           ports:
             - containerPort: {{ .Values.registry.service.port }}
-              name: grpc
+              name: http
           env:
-            - name: GRPC_ADDR
-              value: {{ .Values.registry.grpcAddr | quote }}
+            - name: HTTP_ADDR
+              value: {{ .Values.registry.httpAddr | quote }}
             - name: REPO_DIR
               value: {{ .Values.registry.repoDir | quote }}
             - name: SKILLS_REPO_URL
@@ -101,10 +101,10 @@ spec:
             - name: EVIDENCE_BACKUP_INTERVAL
               value: {{ .Values.registry.evidence.backup.interval | quote }}
             {{- end }}
-            - name: GRPC_MAX_RECV_MSG_SIZE_BYTES
-              value: {{ mul .Values.registry.grpcMaxRecvMsgSizeMiB 1048576 | quote }}
-            - name: GRPC_MAX_SEND_MSG_SIZE_BYTES
-              value: {{ mul .Values.registry.grpcMaxSendMsgSizeMiB 1048576 | quote }}
+            - name: MAX_REQUEST_BODY_BYTES
+              value: {{ mul .Values.registry.maxRequestBodyMiB 1048576 | quote }}
+            - name: MAX_RESULT_BYTES
+              value: {{ mul .Values.registry.maxResultKiB 1024 | quote }}
             - name: MAX_FILE_CONTENT_BYTES
               value: {{ mul .Values.registry.maxFileContentSizeMiB 1048576 | quote }}
             - name: LOG_LEVEL
@@ -121,13 +121,15 @@ spec:
               mountPath: {{ .Values.registry.evidence.dbPath | dir }}
             {{- end }}
           readinessProbe:
-            grpc:
-              port: {{ .Values.registry.service.port }}
+            httpGet:
+              path: /healthz
+              port: http
             initialDelaySeconds: 5
             periodSeconds: 5
           livenessProbe:
-            grpc:
-              port: {{ .Values.registry.service.port }}
+            httpGet:
+              path: /healthz
+              port: http
             initialDelaySeconds: 10
             periodSeconds: 10
           resources:

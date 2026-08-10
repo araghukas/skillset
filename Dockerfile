@@ -12,4 +12,7 @@ COPY --from=build /out/skillsd /skillsd
 COPY --from=build /out/skillsd-registry /skillsd-registry
 COPY --from=build /out/skillsd-init /skillsd-init
 USER nonroot:nonroot
+# skillsd and skillsd-registry default to :8080/:8081 respectively (see
+# internal/config, internal/registryconfig); skillsd-init has no listener.
+EXPOSE 8080 8081
 ENTRYPOINT ["/skillsd"]

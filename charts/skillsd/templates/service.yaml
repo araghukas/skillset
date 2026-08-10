@@ -12,5 +12,5 @@ spec:
     app.kubernetes.io/component: skillsd
   ports:
     - port: {{ .Values.service.port }}
-      targetPort: grpc
-      name: grpc
+      targetPort: http
+      name: http

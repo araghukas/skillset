@@ -2,5 +2,9 @@ apiVersion: v2
 name: skillsd
 description: A skills and learning API for Agents
 type: application
-version: 0.1.0
-appVersion: "0.1.0"
+# 0.2.0 is a breaking change: the API moved from gRPC to MCP. grpcAddr,
+# grpcMaxRecvMsgSizeMiB, grpcMaxSendMsgSizeMiB (and their registry.*
+# equivalents) were replaced by httpAddr, maxRequestBodyMiB, maxResultKiB -
+# note maxResultKiB is KiB, not MiB. See docs/helm-chart.md.
+version: 0.2.0
+appVersion: "0.2.0"
