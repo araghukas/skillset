@@ -4,26 +4,18 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"net"
 	"os"
 	"os/signal"
 	"syscall"
 
-	skillsv1 "github.com/araghukas/skillset/gen/skills/v1"
 	"github.com/araghukas/skillset/internal/clientguide"
 	"github.com/araghukas/skillset/internal/config"
 	"github.com/araghukas/skillset/internal/gitrev"
 	"github.com/araghukas/skillset/internal/mcphttp"
 	"github.com/araghukas/skillset/internal/registry"
-	"github.com/araghukas/skillset/internal/server"
 	"github.com/araghukas/skillset/internal/skilltools"
 	"github.com/araghukas/skillset/internal/storage"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"golang.org/x/sync/errgroup"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/health"
-	"google.golang.org/grpc/health/grpc_health_v1"
-	"google.golang.org/grpc/reflection"
 )
 
 // version is stamped at build time; unset in `go run`/`go test` builds.
@@ -59,51 +51,6 @@ func run() error {
 	}
 	slog.Info("loaded skill index", "count", count)
 
-	group, gctx := errgroup.WithContext(ctx)
-
-	if cfg.GRPCAddr != "" {
-		group.Go(func() error { return serveGRPC(gctx, cfg, reg) })
-	}
-	if cfg.MCPAddr != "" {
-		group.Go(func() error { return serveMCP(gctx, cfg, reg) })
-	}
-	if cfg.GRPCAddr == "" && cfg.MCPAddr == "" {
-		return fmt.Errorf("neither GRPC_ADDR nor MCP_ADDR is set; at least one transport must be enabled")
-	}
-
-	return group.Wait()
-}
-
-func serveGRPC(ctx context.Context, cfg config.Config, reg *registry.Registry) error {
-	healthSrv := health.NewServer()
-	healthSrv.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
-
-	lis, err := net.Listen("tcp", cfg.GRPCAddr)
-	if err != nil {
-		return err
-	}
-
-	grpcServer := grpc.NewServer(
-		grpc.MaxRecvMsgSize(cfg.GRPCMaxRecvMsgSizeBytes),
-		grpc.MaxSendMsgSize(cfg.GRPCMaxSendMsgSizeBytes),
-	)
-	skillsv1.RegisterSkillServiceServer(grpcServer, server.New(reg))
-	grpc_health_v1.RegisterHealthServer(grpcServer, healthSrv)
-	reflection.Register(grpcServer)
-
-	go func() {
-		<-ctx.Done()
-		slog.Info("shutdown signal received, draining gRPC connections")
-		grpcServer.GracefulStop()
-	}()
-
-	slog.Info("skillsd listening (gRPC)", "addr", cfg.GRPCAddr)
-	return grpcServer.Serve(lis)
-}
-
-// serveMCP runs the MCP server alongside gRPC. It shares the same
-// registry, so both transports serve an identical view of the skill index.
-func serveMCP(ctx context.Context, cfg config.Config, reg *registry.Registry) error {
 	srv := mcp.NewServer(
 		&mcp.Implementation{Name: "skillsd", Version: version},
 		&mcp.ServerOptions{
@@ -113,10 +60,10 @@ func serveMCP(ctx context.Context, cfg config.Config, reg *registry.Registry) er
 			Capabilities: &mcp.ServerCapabilities{},
 		},
 	)
-	skilltools.Add(srv, reg)
+	skilltools.Add(srv, reg, cfg.MaxResultBytes)
 
 	return mcphttp.Serve(ctx, srv, mcphttp.Options{
-		Addr:                cfg.MCPAddr,
+		Addr:                cfg.HTTPAddr,
 		MaxRequestBodyBytes: cfg.MaxRequestBodyBytes,
 	})
 }

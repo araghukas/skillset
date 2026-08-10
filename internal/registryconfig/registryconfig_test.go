@@ -61,8 +61,8 @@ func TestLoadAppliesDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.GRPCAddr != ":8081" {
-		t.Errorf("unexpected GRPCAddr: %q", cfg.GRPCAddr)
+	if cfg.HTTPAddr != ":8081" {
+		t.Errorf("unexpected HTTPAddr: %q", cfg.HTTPAddr)
 	}
 	if cfg.SkillsRepoBaseBranch != "main" {
 		t.Errorf("unexpected SkillsRepoBaseBranch: %q", cfg.SkillsRepoBaseBranch)

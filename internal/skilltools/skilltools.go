@@ -22,8 +22,10 @@ const (
 	maxPageSize     = 200
 )
 
-// Add registers the read-path tools on srv.
-func Add(srv *mcp.Server, reg *registry.Registry) {
+// Add registers the read-path tools on srv. defaultMaxBytes is the
+// context-file byte budget applied when a caller's get_skill call doesn't
+// set max_bytes itself; pass 0 to use toolresult.DefaultMaxBytes.
+func Add(srv *mcp.Server, reg *registry.Registry, defaultMaxBytes int) {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: "list_skills",
 		Description: "List the skills this server currently serves. Returns metadata only - " +
@@ -40,7 +42,7 @@ func Add(srv *mcp.Server, reg *registry.Registry) {
 			"specific files when you already know which you need. Note this server does not " +
 			"execute anything a skill ships with; running its scripts is up to you.",
 		Annotations: readOnly(),
-	}, getSkill(reg))
+	}, getSkill(reg, defaultMaxBytes))
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: "get_client_guide",
@@ -151,7 +153,7 @@ type GetSkillInput struct {
 	MaxBytes            int      `json:"max_bytes,omitempty" jsonschema:"cap on total context-file bytes returned; omit for 262144. Files are returned whole, and any dropped are named in the reply"`
 }
 
-func getSkill(reg *registry.Registry) mcp.ToolHandlerFor[GetSkillInput, any] {
+func getSkill(reg *registry.Registry, defaultMaxBytes int) mcp.ToolHandlerFor[GetSkillInput, any] {
 	return func(ctx context.Context, _ *mcp.CallToolRequest, in GetSkillInput) (*mcp.CallToolResult, any, error) {
 		if in.SkillName == "" {
 			return nil, nil, fmt.Errorf("skill_name is required")
@@ -160,8 +162,12 @@ func getSkill(reg *registry.Registry) mcp.ToolHandlerFor[GetSkillInput, any] {
 		if !ok {
 			return nil, nil, fmt.Errorf("no skill named %q; call list_skills to see what is available", in.SkillName)
 		}
+		maxBytes := in.MaxBytes
+		if maxBytes <= 0 {
+			maxBytes = defaultMaxBytes
+		}
 		return &mcp.CallToolResult{
-			Content: toolresult.Skill(sk.Metadata, in.IncludeContextFiles, in.Paths, in.MaxBytes),
+			Content: toolresult.Skill(sk.Metadata, in.IncludeContextFiles, in.Paths, maxBytes),
 		}, nil, nil
 	}
 }

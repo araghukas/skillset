@@ -32,6 +32,16 @@ type Deps struct {
 	// identical content before a pull request is opened without anyone
 	// asking. Zero disables it.
 	AutoSubmitThreshold int
+
+	// DefaultMaxBytes is the context-file byte budget applied when a
+	// caller's get_skill_at_ref call doesn't set max_bytes itself. Zero
+	// uses toolresult.DefaultMaxBytes.
+	DefaultMaxBytes int
+
+	// DefaultMaxDiffBytes is the diff byte budget applied when a caller's
+	// get_proposal call doesn't set max_diff_bytes itself. Zero uses
+	// toolresult.DefaultMaxDiffBytes.
+	DefaultMaxDiffBytes int
 }
 
 // Add registers the proposal tools on srv.
@@ -250,7 +260,11 @@ func getProposal(deps Deps) mcp.ToolHandlerFor[GetProposalInput, *proposals.Prop
 		if in.OmitDiff {
 			p.Diff = ""
 		} else {
-			p.Diff, p.DiffTruncated = toolresult.TruncateDiff(p.Diff, in.MaxDiffBytes)
+			maxDiffBytes := in.MaxDiffBytes
+			if maxDiffBytes <= 0 {
+				maxDiffBytes = deps.DefaultMaxDiffBytes
+			}
+			p.Diff, p.DiffTruncated = toolresult.TruncateDiff(p.Diff, maxDiffBytes)
 		}
 		return nil, p, nil
 	}
@@ -296,8 +310,12 @@ func getSkillAtRef(deps Deps) mcp.ToolHandlerFor[GetSkillAtRefInput, any] {
 		if err != nil {
 			return nil, nil, err
 		}
+		maxBytes := in.MaxBytes
+		if maxBytes <= 0 {
+			maxBytes = deps.DefaultMaxBytes
+		}
 		return &mcp.CallToolResult{
-			Content: toolresult.Skill(md, in.IncludeContextFiles, in.Paths, in.MaxBytes),
+			Content: toolresult.Skill(md, in.IncludeContextFiles, in.Paths, maxBytes),
 		}, nil, nil
 	}
 }

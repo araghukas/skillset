@@ -54,7 +54,7 @@ func testRegistry(t *testing.T, names ...string) *registry.Registry {
 func connect(t *testing.T, reg *registry.Registry) *mcp.ClientSession {
 	t.Helper()
 	srv := mcp.NewServer(&mcp.Implementation{Name: "skillsd", Version: "test"}, nil)
-	Add(srv, reg)
+	Add(srv, reg, 0)
 
 	ct, st := mcp.NewInMemoryTransports()
 	ctx := context.Background()

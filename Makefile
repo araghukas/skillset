@@ -8,7 +8,6 @@ RELEASE       := skillsd
 KIND_CONTEXT  := kind-skillsd
 CLUSTER_CFG   := local/cluster.yaml
 VALUES        := local/values.yaml
-GRPC_PORT     := 8080
 
 # Upstream repo the local Gitea stand-in is seeded from (see local/gitea-init.sh).
 # Override on the command line: make gitea-up GITEA_SEED_URL=https://github.com/me/my-skills.git
@@ -53,10 +52,6 @@ vet: ## Run go vet
 .PHONY: fmt
 fmt: ## Format Go source
 	gofmt -l -w .
-
-.PHONY: proto
-proto: ## Regenerate Go code from proto/
-	buf generate
 
 .PHONY: clean
 clean: ## Remove build artifacts

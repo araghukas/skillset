@@ -4,32 +4,23 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"syscall"
 	"time"
 
-	skillsv1 "github.com/araghukas/skillset/gen/skills/v1"
 	"github.com/araghukas/skillset/internal/clientguide"
 	"github.com/araghukas/skillset/internal/evidence"
-	"github.com/araghukas/skillset/internal/evidenceserver"
 	"github.com/araghukas/skillset/internal/evidencetools"
 	"github.com/araghukas/skillset/internal/githubpr"
 	"github.com/araghukas/skillset/internal/gitrepo"
 	"github.com/araghukas/skillset/internal/mcphttp"
 	"github.com/araghukas/skillset/internal/proposals"
-	"github.com/araghukas/skillset/internal/proposalserver"
 	"github.com/araghukas/skillset/internal/proposaltools"
 	"github.com/araghukas/skillset/internal/registryconfig"
 	"github.com/araghukas/skillset/internal/submit"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"golang.org/x/sync/errgroup"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/health"
-	"google.golang.org/grpc/health/grpc_health_v1"
-	"google.golang.org/grpc/reflection"
 )
 
 // version is stamped at build time; unset in `go run`/`go test` builds.
@@ -63,7 +54,7 @@ func run() error {
 	slog.Info("opened skills repo",
 		"dir", cfg.RepoDir, "base_branch", cfg.SkillsRepoBaseBranch, "github_auth_mode", cfg.GitHubAuthMode)
 	if !cfg.SubmitProposalEnabled {
-		slog.Warn("SubmitProposal is disabled: GitHub auth not configured or SUBMIT_PROPOSAL_ENABLED=false")
+		slog.Warn("submit_proposal is disabled: GitHub auth not configured or SUBMIT_PROPOSAL_ENABLED=false")
 	}
 
 	svc := proposals.New(repo, cfg.SkillsSubPath, cfg.MaxFileContentBytes)
@@ -78,9 +69,11 @@ func run() error {
 
 	submitter := submit.New(svc, gh, cfg.SkillsRepoBaseBranch)
 
-	// EvidenceService is optional: without it the registry is still a
+	// Evidence collection is optional: without it the registry is still a
 	// complete proposal path, just one whose pull requests arrive without
-	// the field data that motivated them.
+	// the field data that motivated them. The evidence tools are only
+	// registered below when a store is opened, so a disabled configuration
+	// means those tools are simply absent from tools/list.
 	var store *evidence.Store
 	if cfg.EvidenceEnabled {
 		store, err = openEvidence(ctx, cfg)
@@ -95,61 +88,12 @@ func run() error {
 		slog.Info("evidence collection is disabled; no outcome reports will be collected")
 	}
 
-	group, gctx := errgroup.WithContext(ctx)
-
-	if cfg.GRPCAddr != "" {
-		group.Go(func() error { return serveGRPC(gctx, cfg, svc, gh, store) })
-	}
-	if cfg.MCPAddr != "" {
-		group.Go(func() error { return serveMCP(gctx, cfg, svc, submitter, store) })
-	}
-	if cfg.GRPCAddr == "" && cfg.MCPAddr == "" {
-		return fmt.Errorf("neither GRPC_ADDR nor MCP_ADDR is set; at least one transport must be enabled")
-	}
-
-	return group.Wait()
-}
-
-func serveGRPC(ctx context.Context, cfg registryconfig.Config, svc *proposals.Service, gh *githubpr.Client, store *evidence.Store) error {
-	healthSrv := health.NewServer()
-	healthSrv.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
-
-	lis, err := net.Listen("tcp", cfg.GRPCAddr)
-	if err != nil {
-		return err
-	}
-
-	grpcServer := grpc.NewServer(
-		grpc.MaxRecvMsgSize(cfg.GRPCMaxRecvMsgSizeBytes),
-		grpc.MaxSendMsgSize(cfg.GRPCMaxSendMsgSizeBytes),
-	)
-	skillsv1.RegisterProposalServiceServer(grpcServer, proposalserver.New(
-		svc, gh, cfg.SkillsRepoBaseBranch, cfg.SubmitProposalEnabled, cfg.AutoSubmitEndorsements))
-	if store != nil {
-		skillsv1.RegisterEvidenceServiceServer(grpcServer,
-			evidenceserver.New(store, svc, cfg.EvidenceVerifyCommits))
-	}
-	grpc_health_v1.RegisterHealthServer(grpcServer, healthSrv)
-	reflection.Register(grpcServer)
-
-	go func() {
-		<-ctx.Done()
-		slog.Info("shutdown signal received, draining gRPC connections")
-		grpcServer.GracefulStop()
-	}()
-
-	slog.Info("skillsd-registry listening (gRPC)", "addr", cfg.GRPCAddr)
-	return grpcServer.Serve(lis)
-}
-
-// serveMCP runs the MCP server alongside gRPC. It shares the same
-// proposals.Service, submit.Submitter, and (if enabled) evidence.Store, so
-// every transport serves an identical view of the registry's state.
-func serveMCP(ctx context.Context, cfg registryconfig.Config, svc *proposals.Service, submitter *submit.Submitter, store *evidence.Store) error {
 	srv := mcp.NewServer(
 		&mcp.Implementation{Name: "skillsd-registry", Version: version},
 		&mcp.ServerOptions{
 			Instructions: clientguide.Instructions("registry"),
+			// Suppress the SDK's default advertisement of a "logging"
+			// capability, which this server does not implement.
 			Capabilities: &mcp.ServerCapabilities{},
 		},
 	)
@@ -158,6 +102,7 @@ func serveMCP(ctx context.Context, cfg registryconfig.Config, svc *proposals.Ser
 		Submitter:           submitter,
 		SubmitEnabled:       cfg.SubmitProposalEnabled,
 		AutoSubmitThreshold: cfg.AutoSubmitEndorsements,
+		DefaultMaxBytes:     cfg.MaxResultBytes,
 	})
 	if store != nil {
 		evidencetools.Add(srv, evidencetools.Deps{
@@ -168,7 +113,7 @@ func serveMCP(ctx context.Context, cfg registryconfig.Config, svc *proposals.Ser
 	}
 
 	return mcphttp.Serve(ctx, srv, mcphttp.Options{
-		Addr:                cfg.MCPAddr,
+		Addr:                cfg.HTTPAddr,
 		MaxRequestBodyBytes: cfg.MaxRequestBodyBytes,
 	})
 }
