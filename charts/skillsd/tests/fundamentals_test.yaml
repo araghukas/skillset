@@ -82,9 +82,6 @@ tests:
             name: MAX_RESULT_BYTES
             value: "262144"
 
-  # Probes are the one thing a broken protocol switch would break silently:
-  # a stale `grpc:` probe left in place would render without error but
-  # never pass, and nothing short of a real deployment would catch it.
   - it: probes health over HTTP on both workloads
     templates:
       - deployment.yaml

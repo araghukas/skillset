@@ -112,17 +112,12 @@ implications of turning this on: [data-stores.md](data-stores.md).
 
 This is the only integration step — there's no SDK to install, and for an
 MCP-capable harness there isn't even a prompt to write. Add both servers as
-MCP servers:
+MCP servers, e.g.:
 
 ```bash
 claude mcp add --transport http skillsd http://skillsd.<namespace>.svc.cluster.local:8080/mcp
 claude mcp add --transport http skillsd-registry http://skillsd-registry.<namespace>.svc.cluster.local:8081/mcp
 ```
-
-(Any MCP client works the same way — `claude mcp add` is shown because it's
-the fewest steps. Both servers accept connections with no handshake beyond
-the standard MCP `initialize`; there's no separate auth step for the agent
-side of this API.)
 
 ```mermaid
 sequenceDiagram
@@ -138,15 +133,6 @@ sequenceDiagram
     Agent->>Read: list_skills / get_skill ...
     Agent->>Write: propose_change / report_outcome ...
 ```
-
-That's the whole integration. The server's `instructions` — delivered
-automatically at connect time — and its `tools/list` schemas are the
-onboarding: no system-prompt text to write, no endpoint description to keep
-in sync by hand. `get_client_guide` (a tool on both servers, and a resource
-at `skillsd://client-guide`) serves the same document again, for a client
-that doesn't surface `instructions` or needs it mid-session — that guide
-(served by the running binary itself, not this repo) is the actual API
-reference.
 
 ## 4. Local development
 

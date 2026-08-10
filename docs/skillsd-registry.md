@@ -143,8 +143,7 @@ sequenceDiagram
 The one thing a git host can't see is whether a skill actually worked. The
 evidence tools collect that — the only data in `skillset` not derived from
 git. They exist only when `registry.evidence.enabled` is true; when it's
-false, they're simply absent from this server's `tools/list`, not present
-and erroring.
+false, they're simply absent from this server's `tools/list`.
 
 | Tool | Purpose |
 |---|---|

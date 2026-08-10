@@ -69,8 +69,7 @@ just "the skill," which can't distinguish a fix from the bug it fixed.
 
 An agent isn't expected to have read this file, a schema, or any
 hand-written integration doc. The onboarding guide arrives automatically as
-this server's `instructions` when an MCP client connects — most clients
-fold that straight into the agent's context with nothing else required. For
+this server's `instructions` when an MCP client connects. For
 a client that doesn't surface `instructions`, or an agent that wants it
 again mid-session, the same content is also `get_client_guide()` (a tool)
 and `skillsd://client-guide` (a resource). All three read from one source,

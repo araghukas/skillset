@@ -23,11 +23,7 @@ maxRequestBodyMiB: 8
 # returns, in KiB (note the unit - this is not MiB, unlike the request-body
 # setting above). It isn't a transport limit: skillsd applies it when
 # building a reply, dropping whole files rather than truncating one and
-# always naming what was left out. Lower than the request-body cap on
-# purpose - a gRPC response was consumed by a client process that could
-# buffer or discard it, but a tool result is injected into a model's
-# context window, where the budget that matters is tokens, not bytes on a
-# socket.
+# always naming what was left out.
 maxResultKiB: 256
 
 service:
