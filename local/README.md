@@ -134,27 +134,27 @@ is a production concern the local loop doesn't model.
 
 # Talking to a local deployment
 
-This section describes manual interaction with the skillset API across
-`skillsd` and `skillsd-registry`. Both are plain gRPC services with
-[server reflection](https://github.com/grpc/grpc/blob/master/doc/server-reflection.md)
-enabled to help guide AI agents, along with a `GetClientGuide` method
-which serves a meta-skill about the API.
+`skillsd` and `skillsd-registry` are MCP servers over Streamable HTTP. Point an
+MCP-capable client at each one and its tools appear with no separate schema
+file and no prompt engineering required — that discovery is the point of the
+protocol, and it's why there's no reflection step here the way there would be
+for gRPC.
 
 *Any skill names in the examples below (e.g. `internal-comms`, `algorithmic-art`)*
 *correspond to the default public seed repo of the Gitea-backed deployment.*
 
-
 ### 1. Get a port-forward
 
 If you're running via `make dev` / `tilt up`, the Tiltfile already forwards
-`localhost:8080` to the pod (`port_forwards=['8080:8080']` on the `skillsd`
-resource) — nothing else to do, skip to step 2.
+`localhost:8080` (skillsd) and `localhost:8081` (skillsd-registry) to their
+pods — nothing else to do, skip to step 2.
 
 Outside of Tilt (e.g. Tilt UI paused, or you just want a plain kubectl session),
-forward the Service directly:
+forward the Services directly:
 
 ```bash
 kubectl --context kind-skillsd port-forward svc/skillsd 8080:8080
+kubectl --context kind-skillsd port-forward svc/skillsd-registry 8081:8081
 ```
 
 (`svc/skillsd` because the Helm release is named `skillsd` and the chart's
@@ -162,200 +162,118 @@ fullname template collapses to just the chart name when release == chart name �
 see
 [charts/skillsd/templates/_helpers.tpl](../charts/skillsd/templates/_helpers.tpl).)
 
-### 2. Call it with grpcurl
+### 2. Connect an MCP client
 
-List services/methods via reflection (confirms the port-forward is live and
-reflection is working):
+With the Claude Code CLI:
 
 ```bash
-grpcurl -plaintext localhost:8080 list
-grpcurl -plaintext localhost:8080 list skills.v1.SkillService
+claude mcp add --transport http skillsd http://localhost:8080/mcp
+claude mcp add --transport http skillsd-registry http://localhost:8081/mcp
 ```
 
-`ListSkills` — metadata only, no context files:
+Then, in a session: `skillsd`'s tools (`list_skills`, `get_skill`,
+`get_client_guide`) and `skillsd-registry`'s (`propose_change`,
+`get_proposal`, and the rest) are simply available — the client fetched the
+schema and read the onboarding guide from the server's `instructions` field
+at connect time. No file to hand it, no snippet to paste into a system
+prompt.
+
+Any MCP client works the same way; `claude mcp add` is shown because it's the
+fewest steps.
+
+### 3. Or drive it directly
+
+For scripting or debugging without a full client, use `curl` against the raw
+JSON-RPC endpoint (the streamable transport, so include the SSE `Accept`
+header even for a plain request/response call):
 
 ```bash
-grpcurl -plaintext -d '{}' localhost:8080 skills.v1.SkillService/ListSkills
+curl -s http://localhost:8080/healthz   # readiness/liveness probe target, not MCP
+
+curl -s -X POST http://localhost:8080/mcp \
+  -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
 ```
 
-Filtered by category, with context files included:
+`get_skill` — fetch one skill by name, with its context files:
 
 ```bash
-grpcurl -plaintext -d '{
-  "category": "data",
-  "include_context_files": true
-}' localhost:8080 skills.v1.SkillService/ListSkills
+curl -s -X POST http://localhost:8080/mcp \
+  -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{
+    "name": "get_skill",
+    "arguments": {"skill_name": "algorithmic-art", "include_context_files": true}
+  }}'
 ```
 
-`GetSkill` — fetch one skill by name:
+An unknown `skill_name` comes back as a tool error (`"isError": true` in the
+result), not a protocol-level failure — the call still succeeds at the
+JSON-RPC level.
+
+`propose_change` against `skillsd-registry` — full new file content, not a
+patch; the server computes the diff:
 
 ```bash
-grpcurl -plaintext -d '{
-  "skill_name": "algorithmic-art",
-  "include_context_files": true
-}' localhost:8080 skills.v1.SkillService/GetSkill
-```
-
-An unknown `skill_name` is a `NotFound` error, not an empty/zero-value response:
-
-```bash
-grpcurl -plaintext -d '{"skill_name": "does-not-exist"}' localhost:8080 skills.v1.SkillService/GetSkill
-```
-
-`GetClientGuide` fetches the embedded usage guide for the API itself (not part
-of `ListSkills`):
-
-```bash
-grpcurl -plaintext -d '{}' localhost:8080 skills.v1.SkillService/GetClientGuide
-```
-
-Health check (via `grpc.health.v1.Health`, registered alongside `SkillService`
-in main.go):
-
-```bash
-grpcurl -plaintext localhost:8080 grpc.health.v1.Health/Check
-```
-
----
-
-## Exercising skillsd-registry (proposals + PRs)
-
-All three modes above supply the registry's write credential, so it comes up
-without extra work and is forwarded at `localhost:8081`. `SubmitProposal`
-opens a real PR against whichever remote is configured (e.g. the Gitea `skills`
-repo in mode 1, since its REST API mirrors GitHub's for pull requests).
-
-Propose a change (full new file content, not a patch - the server computes the diff):
-
-```bash
-grpcurl -plaintext -d '{
-  "skill_name": "internal-comms",
-  "agent_id": "agent-1",
-  "proposal_id": "fix-typo",
-  "commit_message": "fix typo in description",
-  "files": [{"file_path": "SKILL.md", "content": "---\nname: internal-comms\ndescription: A set of resources to help me write all kinds of internal communications, using the formats that my company likes to use. Claude should use this skill whenever asked to write some sort of internal communications (status reports, leadership updates, 3P updates, company newsletters, FAQs, incident reports, project updates, etc.).\nlicense: Complete terms in LICENSE.txt\n---\n\n## When to use this skill\nTo write internal communications, use this skill for:\n- 3P updates (Progress, Plans, Problems)\n- Company newsletters\n- FAQ responses\n- Status reports\n- Leadership updates\n- Project updates\n- Incident reports\n\n## How to use this skill\n\nTo write any internal communication:\n\n1. **Identify the communication type** from the request\n2. **Load the appropriate guideline file** from the `examples/` directory:\n    - `examples/3p-updates.md` - For Progress/Plans/Problems team updates\n    - `examples/company-newsletter.md` - For company-wide newsletters\n    - `examples/faq-answers.md` - For answering frequently asked questions\n    - `examples/general-comms.md` - For anything else that doesn'\''t explicitly match one of the above\n3. **Follow the specific instructions** in that file for formatting, tone, and content gathering\n\nIf the communication type doesn'\''t match any existing guideline, ask for clarification or more context about the desired format.\n\n## Keywords\n3P updates, company newsletter, company comms, weekly update, FAQs, common questions, updates, internal comms\n"}]
-}' localhost:8081 skills.v1.ProposalService/ProposeChange
+curl -s -X POST http://localhost:8081/mcp \
+  -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{
+    "name": "propose_change",
+    "arguments": {
+      "skill_name": "internal-comms",
+      "agent_id": "agent-1",
+      "proposal_id": "fix-typo",
+      "commit_message": "fix typo in description",
+      "files": [{"file_path": "SKILL.md", "content": "---\nname: internal-comms\ndescription: fixed description\n---\nbody\n"}]
+    }
+  }}'
 ```
 
 (Re-running this exact call fails with `cannot create empty commit: clean
-working tree` once the branch already has this content committed - expected, not
-a bug.)
+working tree` once the branch already has this content committed - expected,
+not a bug.)
 
-Inspect it (includes the unified diff against base):
-
-```bash
-grpcurl -plaintext -d '{"branch": "proposals/agent-1/internal-comms/fix-typo"}' \
-  localhost:8081 skills.v1.ProposalService/GetProposal
-```
-
-View the skill as of that proposal branch, or as of the base branch (`ref`
-empty):
-
-```bash
-grpcurl -plaintext -d '{"skill_name": "internal-comms", "ref": "proposals/agent-1/internal-comms/fix-typo"}' \
-  localhost:8081 skills.v1.ProposalService/GetSkillAtRef
-```
-
-List open proposals for a skill (or drop `skill_name` to list everything):
-
-```bash
-grpcurl -plaintext -d '{"skill_name": "internal-comms"}' \
-  localhost:8081 skills.v1.ProposalService/ListProposals
-```
-
-Group a skill's open proposals by whether they touch overlapping regions of the
-same files (`include_singletons` also surfaces proposals with no overlap,
-otherwise only contested groups are returned):
-
-```bash
-grpcurl -plaintext -d '{"skill_name": "internal-comms", "include_singletons": true}' \
-  localhost:8081 skills.v1.ProposalService/ListProposalClusters
-```
-
-Push the branch and open a real GitHub pull request for human review:
-
-```bash
-grpcurl -plaintext -d '{"branch": "proposals/agent-1/internal-comms/fix-typo"}' \
-  localhost:8081 skills.v1.ProposalService/SubmitProposal
-```
-
----
-
-## Reporting skill outcomes (skillsd-registry evidence)
-
-`EvidenceService` shares `skillsd-registry`'s endpoint (`localhost:8081`) and
-lets clients report how a skill performed in a session, then read that back as
-either raw reports or an aggregated per-`(skill, commit)` signal. Like
-`SubmitProposal`, this is guarded by a chart flag (`registry.evidence.enabled`)
-- an `Unimplemented` error here means it's off on this deployment, not a bug.
-
-Report an outcome. `report_id` is caller-generated and makes the call idempotent
-- re-sending the same one is a no-op, not a duplicate report:
-
-```bash
-grpcurl -plaintext -d '{
-  "report_id": "verify-example-1",
-  "agent_id": "agent-1",
-  "session_id": "session-1",
-  "skills": [{
-    "skill_name": "internal-comms",
-    "skill_commit": "<commit from GetSkill/ListSkills>",
-    "verdict": "VERDICT_APPLIED_WITH_CORRECTION",
-    "note": "worked, but had to reformat the FAQ section by hand"
-  }]
-}' localhost:8081 skills.v1.EvidenceService/ReportOutcome
-```
-
-(Re-running this exact call returns `{"recorded": false}` the second time -
-expected: the `report_id` already exists, so it's treated as a retry, not a new
-report.)
-
-List the individual reports behind a skill (useful before writing a proposal -
-read what actually went wrong and cite the `report_id`s in
-`ProposeChange.motivating_report_ids`):
-
-```bash
-grpcurl -plaintext -d '{"skill_name": "internal-comms"}' \
-  localhost:8081 skills.v1.EvidenceService/ListOutcomeReports
-```
-
-Get the aggregated signal - one row per `(skill, commit)` with
-`reported_sessions`, `verdict_counts`, and `defect_rate`:
-
-```bash
-grpcurl -plaintext -d '{"skill_name": "internal-comms"}' \
-  localhost:8081 skills.v1.EvidenceService/ListSkillSignals
-```
+Every other tool follows the same `tools/call` shape with its own
+`name`/`arguments` — `get_proposal`, `get_skill_at_ref`, `list_proposals`,
+`list_proposal_clusters`, `submit_proposal`, and (if evidence collection is
+enabled) `report_outcome`, `list_outcome_reports`, `list_skill_signals`. Call
+`get_client_guide` on either server, or read a connected client's onboarding
+instructions, for the full argument shape and workflow each tool expects — the
+guide is generated from the same source both servers advertise at connect
+time, so it never drifts from what's actually registered.
 
 ---
 
 ## Automated verification (`local/verify/`)
 
-The manual `grpcurl` calls above are also codified as re-runnable check scripts,
-against whatever's currently deployed (the Gitea stand-in by default, or a real
-GitHub repo if you've pointed `values.yaml` at one):
+The manual calls above are also codified as a re-runnable Go test suite,
+against whatever's currently deployed (the Gitea stand-in by default, or a
+real GitHub repo if you've pointed `values.yaml` at one):
 
 ```bash
 make verify
 # or directly:
-./local/verify/run-all.sh
+go test -tags e2e -count=1 -v ./local/verify/...
 ```
 
-This runs, in order:
+It's gated behind the `e2e` build tag specifically so `go test ./...` (and
+CI's regular test job) never touches it — this package talks to a real
+deployment over the network, not to the Go API, and has nothing to run
+against outside `make dev` / a real cluster.
 
-| Script | Covers |
+| File | Covers |
 |---|---|
-| `00_health.sh` | reflection + `grpc.health.v1.Health` on both `skillsd` and `skillsd-registry` |
-| `10_skillservice.sh` | `ListSkills`, `GetSkill` (found + not-found), `GetClientGuide` |
-| `20_proposal_flow.sh` | `ProposeChange` → `GetProposal` → `GetSkillAtRef` → `ListProposals` → `ListProposalClusters` → `SubmitProposal` |
-| `30_evidence.sh` | `ReportOutcome` (including idempotent replay), `ListOutcomeReports`, `ListSkillSignals` |
+| `health_test.go` | `/healthz` on both servers, `initialize`'s `instructions`, `tools/list` naming the expected tools |
+| `skills_test.go` | `list_skills`, `get_skill` (found + not-found), `get_client_guide` |
+| `proposals_test.go` | `propose_change` → `get_proposal` → `get_skill_at_ref` → `list_proposals` → `list_proposal_clusters` → `submit_proposal` |
+| `evidence_test.go` | `report_outcome` (including idempotent replay), `list_outcome_reports`, `list_skill_signals` |
 
-Each script is independently runnable (`./local/verify/10_skillservice.sh`) and
-safely repeatable: `20_proposal_flow.sh` mints a timestamp-suffixed
-`proposal_id` each run, so it never hits the "clean working tree" error above.
-Scripts covering an optional feature (`SubmitProposal` when
-`submitProposalEnabled: false`, `EvidenceService` when disabled) print a `skip`
-line and exit 0, so `make verify` reflects what's actually enabled.
+Each file is independently runnable (`go test -tags e2e -run TestGetSkill
+./local/verify/...`) and safely repeatable: the proposal test mints a
+timestamp-suffixed `proposal_id` each run, so it never hits the "clean
+working tree" error above. Tests covering an optional feature
+(`submit_proposal` when `submitProposalEnabled: false`, the evidence tools
+when disabled) call `t.Skip`, so `make verify` reflects what's actually
+enabled rather than failing on it.
 
 They default to `SKILL_NAME=internal-comms` and the standard 8080/8081
 port-forwards - override `SKILL_NAME` if your seed repo has no such skill, and

@@ -42,8 +42,8 @@ build: ## Build the skillsd, skillsd-registry, and skillsd-init binaries into ./
 	go build -o bin/$(APP)-init ./cmd/skillsd-init
 
 .PHONY: test
-test: ## Run the test suite
-	go test ./...
+test: ## Run the test suite (race detector on - see internal/skill.Metadata.Clone)
+	go test -race ./...
 
 .PHONY: vet
 vet: ## Run go vet
@@ -128,5 +128,5 @@ logs: ## Tail skillsd logs on the local cluster
 ## --- Verification ---
 
 .PHONY: verify
-verify: ## Run gRPC verification scripts against the running local deployment
-	./local/verify/run-all.sh
+verify: ## Run MCP verification tests against the running local deployment
+	go test -tags e2e -count=1 -v ./local/verify/...
