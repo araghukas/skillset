@@ -22,7 +22,8 @@ registry:
 helm install skillsd charts/skillsd -f values.yaml
 kubectl get pods -l app.kubernetes.io/instance=skillsd
 kubectl port-forward svc/skillsd 8080:8080
-grpcurl -plaintext localhost:8080 list          # confirm reflection + SkillService are up
+curl -fsS localhost:8080/healthz                # confirm the pod is up
+claude mcp add --transport http skillsd http://localhost:8080/mcp
 ```
 
 A private repo needs credentials. The recommended route is a GitHub App:
@@ -100,7 +101,8 @@ registry:
 ```bash
 helm upgrade skillsd charts/skillsd -f values.yaml
 kubectl port-forward svc/skillsd-registry 8081:8081
-grpcurl -plaintext localhost:8081 list skills.v1.ProposalService
+curl -fsS localhost:8081/healthz
+claude mcp add --transport http skillsd-registry http://localhost:8081/mcp
 ```
 
 Full value reference: [helm-chart.md](helm-chart.md). Storage/backup
@@ -108,8 +110,19 @@ implications of turning this on: [data-stores.md](data-stores.md).
 
 ## 3. Point an agent at it
 
-This is the only integration step — there's no SDK to install. An agent needs
-exactly two things: an endpoint, and the instruction to onboard itself.
+This is the only integration step — there's no SDK to install, and for an
+MCP-capable harness there isn't even a prompt to write. Add both servers as
+MCP servers:
+
+```bash
+claude mcp add --transport http skillsd http://skillsd.<namespace>.svc.cluster.local:8080/mcp
+claude mcp add --transport http skillsd-registry http://skillsd-registry.<namespace>.svc.cluster.local:8081/mcp
+```
+
+(Any MCP client works the same way — `claude mcp add` is shown because it's
+the fewest steps. Both servers accept connections with no handshake beyond
+the standard MCP `initialize`; there's no separate auth step for the agent
+side of this API.)
 
 ```mermaid
 sequenceDiagram
@@ -118,28 +131,21 @@ sequenceDiagram
     participant Read as skillsd :8080
     participant Write as skillsd-registry :8081
 
-    Op->>Agent: "skillsd is at skillsd.<ns>.svc:8080\n(and skillsd-registry at :8081, if deployed)"
-    Agent->>Read: gRPC reflection: list services
-    Read-->>Agent: SkillService, ProposalService, EvidenceService
-    Agent->>Read: GetClientGuide({})
-    Read-->>Agent: onboarding SKILL.md — every RPC,<br/>when to call it, what to send
-    Note over Agent: fully onboarded — no further<br/>docs, proto files, or SDK needed
-    Agent->>Read: ListSkills / GetSkill ...
-    Agent->>Write: ProposeChange / ReportOutcome ...
+    Op->>Agent: claude mcp add skillsd http://...:8080/mcp
+    Agent->>Read: initialize
+    Read-->>Agent: instructions (onboarding guide) + tools/list
+    Note over Agent: fully onboarded — no further<br/>docs, schema files, or SDK needed
+    Agent->>Read: list_skills / get_skill ...
+    Agent->>Write: propose_change / report_outcome ...
 ```
 
-In practice, "point an agent at it" means putting one or two lines in whatever
-system prompt or tool config wires the agent up — something like:
-
-```
-You have access to a skillsd gRPC endpoint at skillsd.<namespace>.svc.cluster.local:8080
-(and, if available, skillsd-registry at :8081). On first use, call
-SkillService.GetClientGuide (no arguments) to learn the full API — which RPCs
-to call, when, and with what fields. Do this before assuming any RPC's shape.
-```
-
-Everything past that point is between the agent and `GetClientGuide` — that
-guide (served by the running binary itself, not this repo) is the actual API
+That's the whole integration. The server's `instructions` — delivered
+automatically at connect time — and its `tools/list` schemas are the
+onboarding: no system-prompt text to write, no endpoint description to keep
+in sync by hand. `get_client_guide` (a tool on both servers, and a resource
+at `skillsd://client-guide`) serves the same document again, for a client
+that doesn't surface `instructions` or needs it mid-session — that guide
+(served by the running binary itself, not this repo) is the actual API
 reference.
 
 ## 4. Local development
@@ -147,5 +153,5 @@ reference.
 For iterating on `skillset` itself (not just deploying it), `make dev` brings up
 a local `kind` cluster with Tilt handling build/deploy/live-reload — see the
 root [README.md](../README.md#local-development) for prerequisites and
-[local/README.md](../local/README.md) for a full `grpcurl` walkthrough against
+[local/README.md](../local/README.md) for a full MCP walkthrough against
 the local instance.

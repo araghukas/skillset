@@ -1,21 +1,21 @@
 # `skillsd` — the read fleet
 
 `skillsd` is the service agents actually read skills from: a stateless,
-horizontally scalable gRPC fleet that serves a static, versioned snapshot of a
-skills repository.
+horizontally scalable MCP fleet that serves a static, versioned snapshot of a
+skills repository over Streamable HTTP.
 
 ## What it serves
 
-| RPC | Purpose |
+| Tool | Purpose |
 |---|---|
-| `ListSkills(category?, include_context_files?)` | Metadata for every skill — the "what exists" query. |
-| `GetSkill(skill_name, include_context_files?)` | One skill's full content: `SKILL.md` plus `scripts/`, `references/`, `assets/`. |
-| `GetClientGuide()` | The agent-facing onboarding doc for the whole API — see below. |
+| `list_skills(category?, cursor?, page_size?)` | Metadata for every skill, paginated — the "what exists" query. |
+| `get_skill(skill_name, include_context_files?, paths?, max_bytes?)` | One skill's full content: `SKILL.md` plus `scripts/`, `references/`, `assets/`. |
+| `get_client_guide()` | The agent-facing onboarding doc for the whole API — see below. |
 
-`grpc.health.v1.Health` is registered alongside `SkillService` for
-liveness/readiness probes. Server reflection is on, so any gRPC client
-(`grpcurl`, a generated stub, an agent) can discover all of this at runtime with
-no `.proto` file in hand.
+`GET /healthz` (plain HTTP, not MCP) backs liveness/readiness probes. Any
+MCP client discovers the tools above, their schemas, and the server's
+onboarding `instructions` at connect time (`initialize` + `tools/list`) —
+no schema file or generated stub needed.
 
 ## How a pod comes up
 
@@ -33,7 +33,7 @@ sequenceDiagram
     Main->>Vol: mount read-only
     Main->>Main: registry.Load() — walk once,<br/>build in-memory index, stamp HEAD commit
     Note over Main: index is now immutable<br/>for the life of the process
-    Main->>Main: serve SkillService over gRPC
+    Main->>Main: serve the skill tools over MCP
 ```
 
 Every replica repeats this independently — there's no leader, no shared cache,
@@ -60,29 +60,36 @@ reads `HEAD` itself.
 
 ## Why the commit matters
 
-Every `SkillMetadata` carries the git commit its content came from. That's what
-lets a downstream outcome report (see
-[skillsd-registry.md](skillsd-registry.md)) say *this exact version* of a skill
-was cited and whether it held up — not just "the skill," which can't distinguish
-a fix from the bug it fixed.
+Every skill carries the git commit its content came from. That's what lets a
+downstream outcome report (see [skillsd-registry.md](skillsd-registry.md))
+say *this exact version* of a skill was cited and whether it held up — not
+just "the skill," which can't distinguish a fix from the bug it fixed.
 
-## The client guide (`GetClientGuide`)
+## The client guide (`get_client_guide`, and connect-time `instructions`)
 
-An agent isn't expected to have read this file, a `.proto`, or any hand-written
-integration doc. It's expected to call `GetClientGuide()` — no arguments, same
-response shape as `GetSkill` — and use that as its onboarding instructions for
-the entire API (`SkillService`, `ProposalService`, `EvidenceService`). Combined
-with gRPC reflection, that one call is sufficient to fully onboard.
+An agent isn't expected to have read this file, a schema, or any
+hand-written integration doc. The onboarding guide arrives automatically as
+this server's `instructions` when an MCP client connects — most clients
+fold that straight into the agent's context with nothing else required. For
+a client that doesn't surface `instructions`, or an agent that wants it
+again mid-session, the same content is also `get_client_guide()` (a tool)
+and `skillsd://client-guide` (a resource). All three read from one source,
+so none of them can drift from what the server actually implements.
 
 Its content is
 [internal/clientguide/skillsd-client/SKILL.md](../internal/clientguide/skillsd-client/SKILL.md),
 embedded into the server binary via `go:embed` — deliberately *not* read from
-the skills repo `ListSkills` indexes, since it documents the API itself: it
-ships versioned with the proto/server, stays available even if the skills repo
-is empty or misconfigured, and never appears in `ListSkills`'s output.
+the skills repo `list_skills` indexes, since it documents the API itself: it
+ships versioned with the server binary, stays available even if the skills
+repo is empty or misconfigured, and never appears in `list_skills`'s output.
+`skillsd`'s `instructions` carry only the tools this server actually has
+(`list_skills`, `get_skill`, `get_client_guide`) — the proposal and evidence
+workflow content lives in the same source file but is filtered out for this
+server; see [skillsd-registry.md](skillsd-registry.md) for where it goes
+instead.
 
 **This README/docs tree and that guide serve different readers.** The guide is
-the wire-protocol reference for an agent (or a human integrating one) — this doc
+the API reference for an agent (or a human integrating one) — this doc
 and its siblings cover deployment and operations.
 
 ## Configuration

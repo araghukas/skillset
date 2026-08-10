@@ -20,7 +20,7 @@ flowchart LR
   GH -- "git clone --depth 1\n(init container, once)" --> SV1
   GH -- "fetch base branch\n(periodic)" --> RV
   RV -- "push proposal branch\n(on submit)" --> GH
-  Agents(["AI agents"]) -- "ReportOutcome" --> EV
+  Agents(["AI agents"]) -- "report_outcome" --> EV
   EV -. "VACUUM INTO\n(periodic snapshot)" .-> Backup[("backup target\n(operator-provided)")]
 ```
 
@@ -51,8 +51,8 @@ repository: the base branch (re-fetched from origin every `fetchInterval`,
 default 5 minutes) plus every open proposal branch it has committed to locally.
 
 **Caveat:** most of this volume is a cache — the base branch is trivially
-re-cloned. But a proposal branch is only pushed upstream when `SubmitProposal`
-is called; until then, it exists **only** in this volume. Deleting `repo-data`
+re-cloned. But a proposal branch is only pushed upstream when
+`submit_proposal` is called; until then, it exists **only** in this volume. Deleting `repo-data`
 before an agent submits its proposal loses that proposal, not just a cache of
 it. In practice this is rarely worth backing up on its own merits (an agent can
 always re-propose), but it's not *purely* a cache the way `skills-data` is.
@@ -92,4 +92,6 @@ volume here needs. Revisit that once the read fleet needs to query evidence
 directly, or write volume passes a few hundred/second.
 
 Can be disabled entirely (`registry.evidence.enabled: false`), in which case
-`EvidenceService`'s RPCs return `Unimplemented` and no database is opened.
+the evidence tools (`report_outcome`, `list_skill_signals`,
+`list_outcome_reports`) are simply absent from this server's `tools/list`
+and no database is opened.
