@@ -84,6 +84,7 @@ func TestToolsListNamesExpectedTools(t *testing.T) {
 		for _, want := range []string{
 			"propose_change", "list_proposals", "get_proposal",
 			"list_proposal_clusters", "get_skill_at_ref", "submit_proposal",
+			"get_client_guide",
 		} {
 			if !got[want] {
 				t.Errorf("skillsd-registry tools/list is missing %q; got %v", want, keys(got))

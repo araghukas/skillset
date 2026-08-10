@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/araghukas/skillset/internal/clientguide"
 	"github.com/araghukas/skillset/internal/proposals"
 	"github.com/araghukas/skillset/internal/submit"
 	"github.com/araghukas/skillset/internal/toolresult"
@@ -98,6 +99,8 @@ func Add(srv *mcp.Server, deps Deps) {
 			"step an agent takes - merging is a human decision.",
 		Annotations: writeTool(true, idempotent()),
 	}, submitProposal(deps))
+
+	clientguide.AddTool(srv)
 }
 
 func readOnly() *mcp.ToolAnnotations {

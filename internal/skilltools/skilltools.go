@@ -44,14 +44,7 @@ func Add(srv *mcp.Server, reg *registry.Registry, defaultMaxBytes int) {
 		Annotations: readOnly(),
 	}, getSkill(reg, defaultMaxBytes))
 
-	mcp.AddTool(srv, &mcp.Tool{
-		Name: "get_client_guide",
-		Description: "Read the full guide to using this server: which tools exist, how the " +
-			"propose/endorse/submit workflow fits together, and what the outcome verdicts " +
-			"mean. The same text is delivered as server instructions at connect time; call " +
-			"this if you need it again or did not receive it.",
-		Annotations: readOnly(),
-	}, getClientGuide)
+	clientguide.AddTool(srv)
 }
 
 func readOnly() *mcp.ToolAnnotations {
@@ -170,16 +163,6 @@ func getSkill(reg *registry.Registry, defaultMaxBytes int) mcp.ToolHandlerFor[Ge
 			Content: toolresult.Skill(sk.Metadata, in.IncludeContextFiles, in.Paths, maxBytes),
 		}, nil, nil
 	}
-}
-
-func getClientGuide(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {
-	guide, ok := clientguide.Guide.ContextFile("SKILL.md")
-	if !ok {
-		return nil, nil, fmt.Errorf("the client guide is missing its SKILL.md; this is a bug in the server build")
-	}
-	return &mcp.CallToolResult{
-		Content: []mcp.Content{toolresult.Text("%s", guide.Content)},
-	}, nil, nil
 }
 
 // Cursors are an encoded offset. The index is immutable for the lifetime of
