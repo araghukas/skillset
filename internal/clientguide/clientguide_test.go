@@ -23,11 +23,27 @@ func TestGuideLoadsWithoutPanicking(t *testing.T) {
 	}
 }
 
-// TestInstructionsBothMarkersPresent guards against a mistyped or removed
-// HTML-comment marker in skillsd-client/SKILL.md silently shipping an
-// empty Instructions string - the source of the bug is a markdown edit,
-// far from any Go code that would otherwise catch it.
-func TestInstructionsBothMarkersPresent(t *testing.T) {
+// TestGuideHasEveryReferenceFile guards against a renamed or deleted
+// reference file silently shipping a truncated guide - componentFiles and
+// guideFiles name these paths by string, so nothing else would catch a typo
+// or a missing file at compile time.
+func TestGuideHasEveryReferenceFile(t *testing.T) {
+	want := []string{"SKILL.md", "references/intro.md", "references/skillsd.md", "references/registry.md", "references/typical-flow.md"}
+	for _, p := range want {
+		cf, ok := Guide.ContextFile(p)
+		if !ok {
+			t.Errorf("embedded guide is missing %s", p)
+			continue
+		}
+		if len(strings.TrimSpace(cf.Content)) == 0 {
+			t.Errorf("%s is empty", p)
+		}
+	}
+}
+
+// TestInstructionsBothComponentsPresent guards against a component file
+// going missing or empty silently shipping a truncated Instructions string.
+func TestInstructionsBothComponentsPresent(t *testing.T) {
 	for _, component := range []string{"skillsd", "registry"} {
 		got := Instructions(component, "")
 		if len(got) < 500 {
@@ -37,121 +53,117 @@ func TestInstructionsBothMarkersPresent(t *testing.T) {
 }
 
 // TestInstructionsAreDisjointByComponent is the point of splitting the
-// guide at all: the skillsd-only section should never advertise the
-// proposal workflow it has no tools for, and the registry-only section
-// should never explain list_skills pagination it doesn't implement.
+// guide at all: the skillsd-only file should never advertise the proposal
+// workflow it has no tools for, and the registry-only file should never
+// explain list_skills pagination it doesn't implement.
 //
-// This checks the component-specific sections directly (via
-// extractSections), not the full Instructions() output - the "shared"
-// block legitimately mentions tools from both components as part of
-// describing the end-to-end workflow, so asserting disjointness on the
-// combined string would be testing the wrong thing.
+// This checks the component-specific files directly, not the full
+// Instructions() output - references/typical-flow.md is universal and
+// legitimately mentions tools from both components as part of describing
+// the end-to-end workflow, so asserting disjointness on the combined string
+// would be testing the wrong thing.
 func TestInstructionsAreDisjointByComponent(t *testing.T) {
-	cf, ok := Guide.ContextFile("SKILL.md")
+	skillsdOnly, ok := Guide.ContextFile("references/skillsd.md")
 	if !ok {
-		t.Fatal("Guide has no SKILL.md")
+		t.Fatal("Guide has no references/skillsd.md")
 	}
-	skillsdOnly := strings.Join(extractSections(cf.Content, "skillsd"), "\n")
-	registryOnly := strings.Join(extractSections(cf.Content, "registry"), "\n")
+	registryOnly, ok := Guide.ContextFile("references/registry.md")
+	if !ok {
+		t.Fatal("Guide has no references/registry.md")
+	}
 
 	for _, tool := range []string{"list_skills(", "get_skill("} {
-		if !strings.Contains(skillsdOnly, tool) {
-			t.Errorf("skillsd section does not mention %q", tool)
+		if !strings.Contains(skillsdOnly.Content, tool) {
+			t.Errorf("skillsd file does not mention %q", tool)
 		}
-		if strings.Contains(registryOnly, tool) {
-			t.Errorf("registry section mentions %q, which is not one of its tools", tool)
+		if strings.Contains(registryOnly.Content, tool) {
+			t.Errorf("registry file mentions %q, which is not one of its tools", tool)
 		}
 	}
 
 	for _, tool := range []string{"propose_change(", "report_outcome(", "submit_proposal("} {
-		if !strings.Contains(registryOnly, tool) {
-			t.Errorf("registry section does not mention %q", tool)
+		if !strings.Contains(registryOnly.Content, tool) {
+			t.Errorf("registry file does not mention %q", tool)
 		}
-		if strings.Contains(skillsdOnly, tool) {
-			t.Errorf("skillsd section mentions %q, which is not one of its tools", tool)
+		if strings.Contains(skillsdOnly.Content, tool) {
+			t.Errorf("skillsd file mentions %q, which is not one of its tools", tool)
 		}
 	}
 }
 
-// TestInstructionsShareCommonContent confirms the "shared" sections - the
-// intro and the typical-flow walkthrough - land in both, rather than only
-// in whichever section happened to come first in the source document.
+// TestInstructionsShareCommonContent confirms the universal files - the
+// intro (SKILL.md) and the typical-flow walkthrough - land in both
+// components' output.
 func TestInstructionsShareCommonContent(t *testing.T) {
 	skillsd := Instructions("skillsd", "")
 	registry := Instructions("registry", "")
 
 	for _, phrase := range []string{
-		"skillsd-registry", // from the shared intro
-		"## Typical flow",  // the second shared block
+		"skillsd-registry", // from references/intro.md
+		"## Typical flow",  // references/typical-flow.md
 		"report_outcome",   // referenced in the "using a skill" flow
 	} {
 		if !strings.Contains(skillsd, phrase) {
-			t.Errorf("skillsd instructions missing shared content %q", phrase)
+			t.Errorf("skillsd instructions missing universal content %q", phrase)
 		}
 		if !strings.Contains(registry, phrase) {
-			t.Errorf("registry instructions missing shared content %q", phrase)
+			t.Errorf("registry instructions missing universal content %q", phrase)
 		}
 	}
 }
 
-// TestInstructionsUnknownComponentIsSharedOnly confirms an unrecognized
-// component name contributes nothing beyond the shared sections - there is
-// simply no "nonexistent:start" marker in the document for it to match.
-// (The shared "Typical flow" walkthrough legitimately mentions tool names
-// from both components in prose, so this checks section count rather than
-// scanning the combined text for tool names - see
-// TestInstructionsAreDisjointByComponent for that check, done against the
-// isolated per-component sections instead.)
-func TestInstructionsUnknownComponentIsSharedOnly(t *testing.T) {
-	cf, ok := Guide.ContextFile("SKILL.md")
-	if !ok {
-		t.Fatal("Guide has no SKILL.md")
-	}
-	if got := extractSections(cf.Content, "nonexistent"); len(got) != 0 {
-		t.Errorf("expected no sections for an unrecognized component, got %d", len(got))
-	}
-
-	sharedOnly := strings.Join(extractSections(cf.Content, "shared"), "\n\n")
+// TestInstructionsUnknownComponentIsUniversalOnly confirms an unrecognized
+// component name contributes nothing beyond SKILL.md and
+// references/typical-flow.md - there is simply no entry for it in
+// componentFiles.
+func TestInstructionsUnknownComponentIsUniversalOnly(t *testing.T) {
+	universalOnly := joinContextFiles([]string{"references/intro.md", "references/typical-flow.md"})
 	unknown := Instructions("nonexistent", "")
-	if sharedOnly != unknown {
-		t.Errorf("Instructions(\"nonexistent\") should equal the shared-only content")
+	if universalOnly != unknown {
+		t.Errorf("Instructions(\"nonexistent\") should equal the universal-only content")
 	}
 }
 
-// TestInstructionsAppendsCatalog confirms a non-empty catalog string is
+// TestInstructionsAppendsCatalog confirms a non-empty appendix string is
 // appended after the guide sections, and that an empty one leaves the
-// output unchanged - the two cases skillsd and skillsd-registry rely on
-// respectively.
+// output unchanged - the two cases skillsd (a skill catalog) and
+// skillsd-registry (a repo configuration section) rely on respectively.
 func TestInstructionsAppendsCatalog(t *testing.T) {
 	base := Instructions("skillsd", "")
 	withCatalog := Instructions("skillsd", "## Skills currently served\n\n- **foo**: does foo things\n")
 
 	if !strings.HasPrefix(withCatalog, base) {
-		t.Fatalf("Instructions with a catalog should extend the base output, not replace it")
+		t.Fatalf("Instructions with an appendix should extend the base output, not replace it")
 	}
 	if !strings.Contains(withCatalog, "does foo things") {
-		t.Errorf("catalog content missing from Instructions output: %q", withCatalog)
+		t.Errorf("appendix content missing from Instructions output: %q", withCatalog)
 	}
 }
 
-func TestExtractSectionsHandlesMultipleOccurrences(t *testing.T) {
-	doc := "before\n<!-- x:start -->first<!-- x:end -->\nmiddle\n<!-- x:start -->second<!-- x:end -->\nafter"
-	got := extractSections(doc, "x")
-	if len(got) != 2 || got[0] != "first" || got[1] != "second" {
-		t.Fatalf("extractSections = %v, want [first second]", got)
+// TestInstructionsAppendsRepoConfigSection confirms a registry-style
+// appendix describing repo configuration shows up in Instructions output
+// just like a skill catalog does - the mechanism is shared, only the
+// content differs by caller.
+func TestInstructionsAppendsRepoConfigSection(t *testing.T) {
+	section := "## Repository configuration\n\n" +
+		"- Skills are read from, and proposals are forked from, https://github.com/acme/skills.git on branch \"main\".\n" +
+		"- submit_proposal opens pull requests against https://github.com/acme/skills, targeting branch \"main\".\n"
+	got := Instructions("registry", section)
+	if !strings.Contains(got, "https://github.com/acme/skills.git") {
+		t.Errorf("expected source repo URL in registry instructions, got: %q", got)
+	}
+	if !strings.Contains(got, "https://github.com/acme/skills") {
+		t.Errorf("expected PR repo URL in registry instructions, got: %q", got)
 	}
 }
 
-func TestExtractSectionsNoMatchIsEmpty(t *testing.T) {
-	got := extractSections("no markers here", "x")
-	if len(got) != 0 {
-		t.Errorf("expected no sections, got %v", got)
-	}
-}
-
-func TestExtractSectionsUnterminatedIsDropped(t *testing.T) {
-	got := extractSections("<!-- x:start -->never closed", "x")
-	if len(got) != 0 {
-		t.Errorf("an unterminated section should be dropped, not returned partially: %v", got)
+// TestJoinContextFilesSkipsMissing confirms a nonexistent path is silently
+// omitted rather than erroring or inserting a placeholder - Instructions
+// relies on this for unrecognized components.
+func TestJoinContextFilesSkipsMissing(t *testing.T) {
+	got := joinContextFiles([]string{"references/intro.md", "does/not/exist.md"})
+	want, _ := Guide.ContextFile("references/intro.md")
+	if got != strings.TrimSpace(want.Content) {
+		t.Errorf("joinContextFiles with a missing path should equal the existing file alone")
 	}
 }

@@ -43,6 +43,11 @@ type Deps struct {
 	// get_proposal call doesn't set max_diff_bytes itself. Zero uses
 	// toolresult.DefaultMaxDiffBytes.
 	DefaultMaxDiffBytes int
+
+	// ClientGuideAppendix is forwarded to clientguide.AddTool - see its docs.
+	// Callers should pass the same string given to clientguide.Instructions
+	// so the connect-time instructions and get_client_guide agree.
+	ClientGuideAppendix string
 }
 
 // Add registers the proposal tools on srv.
@@ -100,7 +105,7 @@ func Add(srv *mcp.Server, deps Deps) {
 		Annotations: writeTool(true, idempotent()),
 	}, submitProposal(deps))
 
-	clientguide.AddTool(srv, "")
+	clientguide.AddTool(srv, deps.ClientGuideAppendix)
 }
 
 func readOnly() *mcp.ToolAnnotations {

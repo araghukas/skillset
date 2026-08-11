@@ -88,10 +88,12 @@ func run() error {
 		slog.Info("evidence collection is disabled; no outcome reports will be collected")
 	}
 
+	guideAppendix := repoConfigSection(cfg)
+
 	srv := mcp.NewServer(
 		&mcp.Implementation{Name: "skillsd-registry", Version: version},
 		&mcp.ServerOptions{
-			Instructions: clientguide.Instructions("registry", ""),
+			Instructions: clientguide.Instructions("registry", guideAppendix),
 			// Suppress the SDK's default advertisement of a "logging"
 			// capability, which this server does not implement.
 			Capabilities: &mcp.ServerCapabilities{},
@@ -103,6 +105,7 @@ func run() error {
 		SubmitEnabled:       cfg.SubmitProposalEnabled,
 		AutoSubmitThreshold: cfg.AutoSubmitEndorsements,
 		DefaultMaxBytes:     cfg.MaxResultBytes,
+		ClientGuideAppendix: guideAppendix,
 	})
 	if store != nil {
 		evidencetools.Add(srv, evidencetools.Deps{
@@ -116,6 +119,27 @@ func run() error {
 		Addr:                cfg.HTTPAddr,
 		MaxRequestBodyBytes: cfg.MaxRequestBodyBytes,
 	})
+}
+
+// repoConfigSection builds the "Repository configuration" section appended
+// to the client guide, naming the two repos/branches a proposal passes
+// through - the repo skills are read from and forked from, and the repo
+// submit_proposal actually opens pull requests against. The two are usually
+// the same repo, but nothing enforces that (GitHubOwner/GitHubRepo can name
+// a different repo than SkillsRepoURL points to), so both are spelled out
+// rather than assumed identical.
+func repoConfigSection(cfg registryconfig.Config) string {
+	prRepo := "not configured - submit_proposal is disabled"
+	if cfg.GitHubOwner != "" && cfg.GitHubRepo != "" {
+		prRepo = fmt.Sprintf("https://github.com/%s/%s", cfg.GitHubOwner, cfg.GitHubRepo)
+	}
+	return fmt.Sprintf(
+		"## Repository configuration\n\n"+
+			"- Skills are read from, and proposals are forked from, %s on branch %q.\n"+
+			"- submit_proposal opens pull requests against %s, targeting branch %q.\n",
+		cfg.SkillsRepoURL, cfg.SkillsRepoBaseBranch,
+		prRepo, cfg.SkillsRepoBaseBranch,
+	)
 }
 
 // openEvidence opens the outcome-report database, creating its parent

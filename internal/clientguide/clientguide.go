@@ -24,7 +24,7 @@ import (
 // ResourceURI is where the guide is available as an MCP resource, for
 // clients that prefer pulling a resource over calling a tool. Same content
 // as the get_client_guide tool and the connect-time Instructions - all
-// three read the embedded SKILL.md, so none of them can drift from the
+// three read the same embedded files, so none of them can drift from the
 // others.
 const ResourceURI = "skillsd://client-guide"
 
@@ -50,64 +50,59 @@ func mustLoad() *skill.Metadata {
 	return md
 }
 
+// componentFiles maps each server ("skillsd" or "registry") to the
+// component-specific reference file its Instructions/get_client_guide
+// output includes, on top of the always-included files in guideFiles.
+var componentFiles = map[string]string{
+	"skillsd":  "references/skillsd.md",
+	"registry": "references/registry.md",
+}
+
 // Instructions returns the guide text to send as an MCP server's
 // ServerOptions.Instructions for the given component: "skillsd" or
 // "registry".
 //
-// The embedded SKILL.md marks its sections with HTML comments
-// (<!-- shared:start/end -->, <!-- skillsd:start/end -->,
-// <!-- registry:start/end -->) so a server only advertises the tools it
-// actually has: skillsd's Instructions carries the "shared" sections plus
-// "skillsd", never the proposal-workflow content that lives under
-// "registry", and vice versa. A section name may appear more than once in
-// the document (skillsd-client/SKILL.md uses two separate "shared" blocks);
-// every occurrence is included, concatenated in document order.
+// The embedded guide is split across explicit files rather than one
+// SKILL.md with marker comments, so a server only advertises the tools it
+// actually has: references/intro.md and references/typical-flow.md are
+// always included; componentFiles picks the one tool-specific file layered
+// between them. SKILL.md itself carries only frontmatter (required by
+// skillparse) and a pointer to references/intro.md - it is deliberately not
+// part of the assembled guide, since its raw content includes that
+// frontmatter block. An unrecognized component gets just the universal
+// files - see TestInstructionsUnknownComponentIsUniversalOnly.
 //
-// catalog, if non-empty, is appended after the guide sections - see AddTool
-// for why this needs to be the same string passed there.
-func Instructions(component, catalog string) string {
-	cf, ok := Guide.ContextFile("SKILL.md")
-	if !ok {
-		return ""
+// appendix, if non-empty, is appended verbatim after the guide sections -
+// see AddTool for why this needs to be the same string passed there. It's
+// deployment-specific content the static embedded files can't know on
+// their own: skillsd appends its skill catalog, skillsd-registry appends a
+// "Repository configuration" section naming the actual repos/branches
+// skills are read from and proposals are opened against (see
+// registryconfig.Config and cmd/skillsd-registry/main.go).
+func Instructions(component, appendix string) string {
+	paths := []string{"references/intro.md"}
+	if p, ok := componentFiles[component]; ok {
+		paths = append(paths, p)
 	}
+	paths = append(paths, "references/typical-flow.md")
 
-	var out []string
-	for _, name := range []string{"shared", component} {
-		out = append(out, extractSections(cf.Content, name)...)
-	}
-	text := strings.Join(out, "\n\n")
-	if catalog != "" {
-		text += "\n\n" + catalog
+	text := joinContextFiles(paths)
+	if appendix != "" {
+		text += "\n\n" + appendix
 	}
 	return text
 }
 
-// extractSections returns the trimmed content of every
-// <!-- name:start -->...<!-- name:end --> region in content, in document
-// order.
-func extractSections(content, name string) []string {
-	start := "<!-- " + name + ":start -->"
-	end := "<!-- " + name + ":end -->"
-
+// joinContextFiles concatenates the named context files' trimmed content,
+// in order, skipping any that don't exist.
+func joinContextFiles(paths []string) string {
 	var out []string
-	for {
-		i := strings.Index(content, start)
-		if i < 0 {
-			break
+	for _, p := range paths {
+		if cf, ok := Guide.ContextFile(p); ok {
+			out = append(out, strings.TrimSpace(cf.Content))
 		}
-		rest := content[i+len(start):]
-		j := strings.Index(rest, end)
-		if j < 0 {
-			// An unterminated section is a bug in the source document, not
-			// a runtime condition to recover from silently: better to drop
-			// it loudly (via the accompanying test) than serve a truncated
-			// guide.
-			break
-		}
-		out = append(out, strings.TrimSpace(rest[:j]))
-		content = rest[j+len(end):]
 	}
-	return out
+	return strings.Join(out, "\n\n")
 }
 
 // AddTool registers get_client_guide, and the equivalent resource at
@@ -115,11 +110,11 @@ func extractSections(content, name string) []string {
 // guide describes tools on both, so both need a way to fetch it that
 // doesn't depend on the client having surfaced connect-time Instructions.
 //
-// catalog, if non-empty, is appended verbatim after the guide text on both
-// the tool and the resource - the same string skillsd appends to its
+// appendix, if non-empty, is appended verbatim after the guide text on both
+// the tool and the resource - the same string passed to the server's
 // connect-time Instructions (see Instructions), so all three delivery paths
-// still agree. Pass "" where there's no such catalog, e.g. skillsd-registry.
-func AddTool(srv *mcp.Server, catalog string) {
+// still agree.
+func AddTool(srv *mcp.Server, appendix string) {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: "get_client_guide",
 		Description: "Read the full guide to using skillsd and skillsd-registry: which tools " +
@@ -127,21 +122,21 @@ func AddTool(srv *mcp.Server, catalog string) {
 			"outcome verdicts mean. The same text is delivered as this server's instructions at " +
 			"connect time; call this if you need it again or did not receive it.",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: falsePtr()},
-	}, getClientGuideTool(catalog))
+	}, getClientGuideTool(appendix))
 
 	srv.AddResource(&mcp.Resource{
 		URI:         ResourceURI,
 		Name:        "skillsd client guide",
 		Description: "Full usage guide for skillsd and skillsd-registry - the same content as the get_client_guide tool.",
 		MIMEType:    "text/markdown",
-	}, getClientGuideResource(catalog))
+	}, getClientGuideResource(appendix))
 }
 
 func falsePtr() *bool { v := false; return &v }
 
-func getClientGuideTool(catalog string) mcp.ToolHandlerFor[struct{}, any] {
+func getClientGuideTool(appendix string) mcp.ToolHandlerFor[struct{}, any] {
 	return func(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {
-		text, err := guideText(catalog)
+		text, err := guideText(appendix)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -151,9 +146,9 @@ func getClientGuideTool(catalog string) mcp.ToolHandlerFor[struct{}, any] {
 	}
 }
 
-func getClientGuideResource(catalog string) func(context.Context, *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+func getClientGuideResource(appendix string) func(context.Context, *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
 	return func(ctx context.Context, _ *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
-		text, err := guideText(catalog)
+		text, err := guideText(appendix)
 		if err != nil {
 			return nil, err
 		}
@@ -165,15 +160,26 @@ func getClientGuideResource(catalog string) func(context.Context, *mcp.ReadResou
 	}
 }
 
-func guideText(catalog string) (string, error) {
-	cf, ok := Guide.ContextFile("SKILL.md")
-	if !ok {
-		return "", fmt.Errorf("the client guide is missing its SKILL.md; this is a bug in the server build")
+// guideFiles is the full guide, every component's file included - what
+// get_client_guide and its resource serve, regardless of which server they
+// run on, since an agent using one server benefits from knowing what the
+// other does too.
+var guideFiles = []string{
+	"references/intro.md",
+	"references/skillsd.md",
+	"references/registry.md",
+	"references/typical-flow.md",
+}
+
+func guideText(appendix string) (string, error) {
+	if _, ok := Guide.ContextFile("references/intro.md"); !ok {
+		return "", fmt.Errorf("the client guide is missing references/intro.md; this is a bug in the server build")
 	}
-	if catalog == "" {
-		return cf.Content, nil
+	text := joinContextFiles(guideFiles)
+	if appendix != "" {
+		text += "\n\n" + appendix
 	}
-	return cf.Content + "\n\n" + catalog, nil
+	return text, nil
 }
 
 // embedBackend is a minimal storage.Backend over an embed.FS, just enough
