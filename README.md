@@ -4,7 +4,7 @@ Skillset serves an evolving set of [agentskills](https://agentskills.io) to a fl
 
 ## Why this exists
 
-While `git` tracks changes, `skillset` tracks *outcomes*.
+While `git` tracks changes, `skillset` tracks *outcomes* and enables skills to evolve over time.
 
 Skills are how a fleet of AI agents remembers what it's learned. `skillset`
 is the layer that turns that memory into something that actually improves:

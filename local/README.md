@@ -30,7 +30,7 @@ list: `make help`.
 ## 1. Gitea stand-in (default)
 
 The default local mode is (almost) fully sandboxed. While it does clone
-a Github repository on startup, **it does not push/pull nor make PRs against any actual Github repos.**
+a GitHub repository on startup, **it does not push/pull or make PRs against any actual GitHub repos.**
 This mode is for development and testing.
 
 ```bash
@@ -77,7 +77,7 @@ created it — reset rather than try to recover it).
 
 ## 2. Real repo with token auth
 
-Token-based Github auth it not recommended unless GitHub App is not possible
+Token-based GitHub auth is not recommended unless GitHub App is not possible
 (e.g. no admin rights to install one).
 
 Prepare two fine-grained tokens with [repository access](https://github.com/settings/personal-access-tokens/new)
