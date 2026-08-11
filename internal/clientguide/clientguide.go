@@ -62,7 +62,10 @@ func mustLoad() *skill.Metadata {
 // "registry", and vice versa. A section name may appear more than once in
 // the document (skillsd-client/SKILL.md uses two separate "shared" blocks);
 // every occurrence is included, concatenated in document order.
-func Instructions(component string) string {
+//
+// catalog, if non-empty, is appended after the guide sections - see AddTool
+// for why this needs to be the same string passed there.
+func Instructions(component, catalog string) string {
 	cf, ok := Guide.ContextFile("SKILL.md")
 	if !ok {
 		return ""
@@ -72,7 +75,11 @@ func Instructions(component string) string {
 	for _, name := range []string{"shared", component} {
 		out = append(out, extractSections(cf.Content, name)...)
 	}
-	return strings.Join(out, "\n\n")
+	text := strings.Join(out, "\n\n")
+	if catalog != "" {
+		text += "\n\n" + catalog
+	}
+	return text
 }
 
 // extractSections returns the trimmed content of every
@@ -107,7 +114,12 @@ func extractSections(content, name string) []string {
 // ResourceURI, on srv. Both skillsd and skillsd-registry call this - the
 // guide describes tools on both, so both need a way to fetch it that
 // doesn't depend on the client having surfaced connect-time Instructions.
-func AddTool(srv *mcp.Server) {
+//
+// catalog, if non-empty, is appended verbatim after the guide text on both
+// the tool and the resource - the same string skillsd appends to its
+// connect-time Instructions (see Instructions), so all three delivery paths
+// still agree. Pass "" where there's no such catalog, e.g. skillsd-registry.
+func AddTool(srv *mcp.Server, catalog string) {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: "get_client_guide",
 		Description: "Read the full guide to using skillsd and skillsd-registry: which tools " +
@@ -115,38 +127,53 @@ func AddTool(srv *mcp.Server) {
 			"outcome verdicts mean. The same text is delivered as this server's instructions at " +
 			"connect time; call this if you need it again or did not receive it.",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: falsePtr()},
-	}, getClientGuideTool)
+	}, getClientGuideTool(catalog))
 
 	srv.AddResource(&mcp.Resource{
 		URI:         ResourceURI,
 		Name:        "skillsd client guide",
 		Description: "Full usage guide for skillsd and skillsd-registry - the same content as the get_client_guide tool.",
 		MIMEType:    "text/markdown",
-	}, getClientGuideResource)
+	}, getClientGuideResource(catalog))
 }
 
 func falsePtr() *bool { v := false; return &v }
 
-func getClientGuideTool(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {
-	cf, ok := Guide.ContextFile("SKILL.md")
-	if !ok {
-		return nil, nil, fmt.Errorf("the client guide is missing its SKILL.md; this is a bug in the server build")
+func getClientGuideTool(catalog string) mcp.ToolHandlerFor[struct{}, any] {
+	return func(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {
+		text, err := guideText(catalog)
+		if err != nil {
+			return nil, nil, err
+		}
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: text}},
+		}, nil, nil
 	}
-	return &mcp.CallToolResult{
-		Content: []mcp.Content{&mcp.TextContent{Text: cf.Content}},
-	}, nil, nil
 }
 
-func getClientGuideResource(ctx context.Context, _ *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+func getClientGuideResource(catalog string) func(context.Context, *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+	return func(ctx context.Context, _ *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+		text, err := guideText(catalog)
+		if err != nil {
+			return nil, err
+		}
+		return &mcp.ReadResourceResult{
+			Contents: []*mcp.ResourceContents{
+				{URI: ResourceURI, MIMEType: "text/markdown", Text: text},
+			},
+		}, nil
+	}
+}
+
+func guideText(catalog string) (string, error) {
 	cf, ok := Guide.ContextFile("SKILL.md")
 	if !ok {
-		return nil, fmt.Errorf("the client guide is missing its SKILL.md; this is a bug in the server build")
+		return "", fmt.Errorf("the client guide is missing its SKILL.md; this is a bug in the server build")
 	}
-	return &mcp.ReadResourceResult{
-		Contents: []*mcp.ResourceContents{
-			{URI: ResourceURI, MIMEType: "text/markdown", Text: cf.Content},
-		},
-	}, nil
+	if catalog == "" {
+		return cf.Content, nil
+	}
+	return cf.Content + "\n\n" + catalog, nil
 }
 
 // embedBackend is a minimal storage.Backend over an embed.FS, just enough

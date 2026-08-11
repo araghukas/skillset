@@ -100,7 +100,7 @@ func Add(srv *mcp.Server, deps Deps) {
 		Annotations: writeTool(true, idempotent()),
 	}, submitProposal(deps))
 
-	clientguide.AddTool(srv)
+	clientguide.AddTool(srv, "")
 }
 
 func readOnly() *mcp.ToolAnnotations {

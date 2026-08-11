@@ -68,6 +68,38 @@ func TestLoadWithPrefix(t *testing.T) {
 	}
 }
 
+// TestCatalog covers the listing appended to skillsd's connect-time
+// instructions: every loaded skill's name and description should appear,
+// sorted by name, and an empty index should produce an empty string rather
+// than a heading with nothing under it.
+func TestCatalog(t *testing.T) {
+	root := t.TempDir()
+	writeSkill(t, root, "zeta-skill", "---\nname: zeta-skill\ndescription: does zeta things\n---\nbody\n")
+	writeSkill(t, root, "alpha-skill", "---\nname: alpha-skill\ndescription: does alpha things\n---\nbody\n")
+
+	reg := New(storage.NewFSBackend(root), "", "")
+	if _, err := reg.Load(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	got := reg.Catalog()
+	wantAlpha := strings.Index(got, "alpha-skill")
+	wantZeta := strings.Index(got, "zeta-skill")
+	if wantAlpha == -1 || wantZeta == -1 {
+		t.Fatalf("catalog missing an expected skill name: %q", got)
+	}
+	if wantAlpha > wantZeta {
+		t.Errorf("catalog not sorted by name: %q", got)
+	}
+	if !strings.Contains(got, "does alpha things") || !strings.Contains(got, "does zeta things") {
+		t.Errorf("catalog missing a description: %q", got)
+	}
+
+	if empty := New(storage.NewFSBackend(t.TempDir()), "", "").Catalog(); empty != "" {
+		t.Errorf("expected empty catalog for an empty index, got %q", empty)
+	}
+}
+
 // TestLoadWithoutPrefix covers the default, unprefixed configuration (empty
 // SKILLS_SUBPATH), where the registry root directly contains skill
 // directories.

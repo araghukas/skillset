@@ -51,16 +51,18 @@ func run() error {
 	}
 	slog.Info("loaded skill index", "count", count)
 
+	catalog := reg.Catalog()
+
 	srv := mcp.NewServer(
 		&mcp.Implementation{Name: "skillsd", Version: version},
 		&mcp.ServerOptions{
-			Instructions: clientguide.Instructions("skillsd"),
+			Instructions: clientguide.Instructions("skillsd", catalog),
 			// Suppress the SDK's default advertisement of a "logging"
 			// capability, which this server does not implement.
 			Capabilities: &mcp.ServerCapabilities{},
 		},
 	)
-	skilltools.Add(srv, reg, cfg.MaxResultBytes)
+	skilltools.Add(srv, reg, cfg.MaxResultBytes, catalog)
 
 	return mcphttp.Serve(ctx, srv, mcphttp.Options{
 		Addr:                cfg.HTTPAddr,

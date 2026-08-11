@@ -75,7 +75,17 @@ again mid-session, the same content is also `get_client_guide()` (a tool)
 and `skillsd://client-guide` (a resource). All three read from one source,
 so none of them can drift from what the server actually implements.
 
-Its content is
+The guide's static text (from `SKILL.md`, below) is followed by a **skill
+catalog**: a `## Skills currently served` section naming and describing
+every skill the running instance's `registry.Registry` holds
+(`registry.Registry.Catalog`), so an agent sees what's actually being served
+without a separate `list_skills` round trip. It's built once, from the same
+in-memory index `list_skills`/`get_skill` read, right after `registry.Load`
+at startup — so it's current as of process start, and (per "No runtime
+refresh, by design" above) stays fixed until the pod restarts, same as the
+rest of the index.
+
+Its static content is
 [internal/clientguide/skillsd-client/SKILL.md](../internal/clientguide/skillsd-client/SKILL.md),
 embedded into the server binary via `go:embed` — deliberately *not* read from
 the skills repo `list_skills` indexes, since it documents the API itself: it

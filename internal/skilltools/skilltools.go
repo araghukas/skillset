@@ -24,8 +24,9 @@ const (
 
 // Add registers the read-path tools on srv. defaultMaxBytes is the
 // context-file byte budget applied when a caller's get_skill call doesn't
-// set max_bytes itself; pass 0 to use toolresult.DefaultMaxBytes.
-func Add(srv *mcp.Server, reg *registry.Registry, defaultMaxBytes int) {
+// set max_bytes itself; pass 0 to use toolresult.DefaultMaxBytes. catalog is
+// forwarded to clientguide.AddTool - see its docs.
+func Add(srv *mcp.Server, reg *registry.Registry, defaultMaxBytes int, catalog string) {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: "list_skills",
 		Description: "List the skills this server currently serves. Returns metadata only - " +
@@ -44,7 +45,7 @@ func Add(srv *mcp.Server, reg *registry.Registry, defaultMaxBytes int) {
 		Annotations: readOnly(),
 	}, getSkill(reg, defaultMaxBytes))
 
-	clientguide.AddTool(srv)
+	clientguide.AddTool(srv, catalog)
 }
 
 func readOnly() *mcp.ToolAnnotations {
@@ -161,16 +162,6 @@ func getSkill(reg *registry.Registry, defaultMaxBytes int) mcp.ToolHandlerFor[Ge
 			Content: toolresult.Skill(sk.Metadata, in.IncludeContextFiles, in.Paths, maxBytes),
 		}, nil, nil
 	}
-}
-
-func getClientGuide(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {
-	guide, ok := clientguide.Guide.ContextFile("SKILL.md")
-	if !ok {
-		return nil, nil, fmt.Errorf("the client guide is missing its SKILL.md; this is a bug in the server build")
-	}
-	return &mcp.CallToolResult{
-		Content: []mcp.Content{toolresult.Text("%s", guide.Content)},
-	}, nil, nil
 }
 
 // Cursors are an encoded offset. The index is immutable for the lifetime of

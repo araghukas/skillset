@@ -29,7 +29,7 @@ func TestGuideLoadsWithoutPanicking(t *testing.T) {
 // far from any Go code that would otherwise catch it.
 func TestInstructionsBothMarkersPresent(t *testing.T) {
 	for _, component := range []string{"skillsd", "registry"} {
-		got := Instructions(component)
+		got := Instructions(component, "")
 		if len(got) < 500 {
 			t.Errorf("Instructions(%q) looks empty or truncated (%d bytes): %q", component, len(got), got)
 		}
@@ -77,8 +77,8 @@ func TestInstructionsAreDisjointByComponent(t *testing.T) {
 // intro and the typical-flow walkthrough - land in both, rather than only
 // in whichever section happened to come first in the source document.
 func TestInstructionsShareCommonContent(t *testing.T) {
-	skillsd := Instructions("skillsd")
-	registry := Instructions("registry")
+	skillsd := Instructions("skillsd", "")
+	registry := Instructions("registry", "")
 
 	for _, phrase := range []string{
 		"skillsd-registry", // from the shared intro
@@ -112,9 +112,25 @@ func TestInstructionsUnknownComponentIsSharedOnly(t *testing.T) {
 	}
 
 	sharedOnly := strings.Join(extractSections(cf.Content, "shared"), "\n\n")
-	unknown := Instructions("nonexistent")
+	unknown := Instructions("nonexistent", "")
 	if sharedOnly != unknown {
 		t.Errorf("Instructions(\"nonexistent\") should equal the shared-only content")
+	}
+}
+
+// TestInstructionsAppendsCatalog confirms a non-empty catalog string is
+// appended after the guide sections, and that an empty one leaves the
+// output unchanged - the two cases skillsd and skillsd-registry rely on
+// respectively.
+func TestInstructionsAppendsCatalog(t *testing.T) {
+	base := Instructions("skillsd", "")
+	withCatalog := Instructions("skillsd", "## Skills currently served\n\n- **foo**: does foo things\n")
+
+	if !strings.HasPrefix(withCatalog, base) {
+		t.Fatalf("Instructions with a catalog should extend the base output, not replace it")
+	}
+	if !strings.Contains(withCatalog, "does foo things") {
+		t.Errorf("catalog content missing from Instructions output: %q", withCatalog)
 	}
 }
 
