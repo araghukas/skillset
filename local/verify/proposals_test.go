@@ -45,12 +45,11 @@ type submitProposalOutput struct {
 	PullRequestURL string `json:"pull_request_url"`
 }
 
-// TestFullProposalLifecycle mirrors the old 20_proposal_flow.sh end to
+// TestFullProposalLifecycle exercises the full proposal flow end to
 // end: propose, re-fetch, read at ref, list, cluster, submit. Uses a
-// timestamp-suffixed proposal_id, same as the original script, so the
-// test is safely re-runnable against a live deployment without a
-// "nothing changed" or "clean working tree" error from a previous run's
-// identical commit.
+// timestamp-suffixed proposal_id so the test is safely re-runnable
+// against a live deployment without a "nothing changed" or "clean
+// working tree" error from a previous run's identical commit.
 func TestFullProposalLifecycle(t *testing.T) {
 	session := connect(t, registryAddr())
 

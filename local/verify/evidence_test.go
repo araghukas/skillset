@@ -12,11 +12,11 @@ import (
 	"time"
 )
 
-// resolveCommit reads skillsd's current commit for skillName, the same
-// prerequisite step 30_evidence.sh performed before it could report
-// anything against it. get_skill's real Content is hand-built text, not
-// structured JSON (see internal/toolresult.Skill), so the commit is
-// parsed out of the "commit: <sha>" line rather than decoded as JSON.
+// resolveCommit reads skillsd's current commit for skillName, a
+// prerequisite before reporting an outcome against it. get_skill's real
+// Content is hand-built text, not structured JSON (see
+// internal/toolresult.Skill), so the commit is parsed out of the
+// "commit: <sha>" line rather than decoded as JSON.
 func resolveCommit(t *testing.T) string {
 	t.Helper()
 	session := connect(t, skillsdAddr())
@@ -66,8 +66,8 @@ func TestEvidenceToolsPresence(t *testing.T) {
 	}
 }
 
-// TestReportOutcomeRoundTrip mirrors 30_evidence.sh: report an outcome,
-// confirm the idempotent replay is a no-op, then confirm it shows up in
+// TestReportOutcomeRoundTrip reports an outcome, confirms the
+// idempotent replay is a no-op, then confirms it shows up in
 // both the raw listing and the aggregated signal. Skipped (not failed) if
 // the evidence tools aren't registered on this deployment.
 func TestReportOutcomeRoundTrip(t *testing.T) {

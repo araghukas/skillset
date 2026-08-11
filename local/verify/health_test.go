@@ -13,10 +13,10 @@ import (
 
 // TestHealthz replaces the old grpc.health.v1.Health check. This is
 // literally the kubelet probe path (see internal/mcphttp.HealthPath and
-// the chart's readinessProbe/livenessProbe) - the old script asserted the
-// gRPC health service reported SERVING, which never actually verified the
-// probe endpoint itself, since gRPC health checks and Kubernetes gRPC
-// probes are different code paths. This does.
+// the chart's readinessProbe/livenessProbe) - asserting that the gRPC
+// health service reported SERVING never actually verified the probe
+// endpoint itself, since gRPC health checks and Kubernetes gRPC probes are
+// different code paths. This does.
 func TestHealthz(t *testing.T) {
 	for _, tc := range []struct {
 		name string

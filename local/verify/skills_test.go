@@ -75,7 +75,7 @@ func TestListSkills(t *testing.T) {
 // TestListSkillsHasNoFileContent pins the behavior change that motivated
 // splitting list_skills from get_skill: the old ListSkills(
 // include_context_files=true) could return every file of every skill in
-// one call - lib.sh documented it as "routinely exceeds 4 MiB" - which
+// one call - routinely exceeding 4 MiB - which
 // would land in a model's context window under MCP. list_skills now
 // carries no file-content field at all; only get_skill returns bodies.
 func TestListSkillsHasNoFileContent(t *testing.T) {

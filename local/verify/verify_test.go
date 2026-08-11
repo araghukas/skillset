@@ -6,15 +6,14 @@
 // only `go test -tags e2e ./local/verify/...` (aliased as `make verify`)
 // does.
 //
-// This replaced a set of bash scripts driving grpcurl. A hand-rolled
-// JSON-RPC client over curl would have to speak the Streamable HTTP
-// transport itself - SSE framing, the Accept and MCP-Protocol-Version
-// headers - which is a worse client than grpcurl was for the protocol it
-// replaced. The MCP Go SDK's own client hides all of that, and lets these
-// tests assert on things bash never could: that a tool's annotations
-// match its actual behavior, that an unknown skill arrives as a tool
-// error rather than a protocol error, that schema validation rejects a
-// missing required field before a handler runs.
+// A hand-rolled JSON-RPC client over curl would have to speak the
+// Streamable HTTP transport itself - SSE framing, the Accept and
+// MCP-Protocol-Version headers - which is a worse client than grpcurl was
+// for the protocol it replaced. The MCP Go SDK's own client hides all of
+// that, and lets these tests assert on things bash never could: that a
+// tool's annotations match its actual behavior, that an unknown skill
+// arrives as a tool error rather than a protocol error, that schema
+// validation rejects a missing required field before a handler runs.
 //
 // Deliberately not internal/*: this package exercises the deployed
 // binaries over the network, not the Go API, so importing anything under
