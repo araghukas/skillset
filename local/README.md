@@ -134,11 +134,7 @@ is a production concern the local loop doesn't model.
 
 # Talking to a local deployment
 
-`skillsd` and `skillsd-registry` are MCP servers over Streamable HTTP. Point an
-MCP-capable client at each one and its tools appear with no separate schema
-file and no prompt engineering required — that discovery is the point of the
-protocol, and it's why there's no reflection step here the way there would be
-for gRPC.
+`skillsd` and `skillsd-registry` are MCP servers over Streamable HTTP.
 
 *Any skill names in the examples below (e.g. `internal-comms`, `algorithmic-art`)*
 *correspond to the default public seed repo of the Gitea-backed deployment.*
@@ -164,22 +160,16 @@ see
 
 ### 2. Connect an MCP client
 
-With the Claude Code CLI:
+With, e.g., the Claude Code CLI:
 
 ```bash
 claude mcp add --transport http skillsd http://localhost:8080/mcp
 claude mcp add --transport http skillsd-registry http://localhost:8081/mcp
 ```
 
-Then, in a session: `skillsd`'s tools (`list_skills`, `get_skill`,
+After this, `skillsd`'s tools (`list_skills`, `get_skill`,
 `get_client_guide`) and `skillsd-registry`'s (`propose_change`,
-`get_proposal`, and the rest) are simply available — the client fetched the
-schema and read the onboarding guide from the server's `instructions` field
-at connect time. No file to hand it, no snippet to paste into a system
-prompt.
-
-Any MCP client works the same way; `claude mcp add` is shown because it's the
-fewest steps.
+`get_proposal`, and the rest) should be available in the session.
 
 ### 3. Or drive it directly
 

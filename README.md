@@ -1,6 +1,6 @@
 # Purpose
 
-Skillset serves a repository of [agentskills](https://agentskills.io) to a fleet of agents, collects proposals for updates and improvements, and [consolidates endorsements](docs/skillsd-registry.md#consolidation-how-n-agents-produce-one-pull-request) into pull requests for final review. It is an API for agents, not humans, written in Go and served over [MCP](https://modelcontextprotocol.io). Agents connect, discover tools, and call them on their own. Curious humans should see [docs/quickstart.md](docs/quickstart.md).
+Skillset serves an evolving set of [agentskills](https://agentskills.io) to a fleet of agents. It collects proposals for updates and improvements, and [consolidates endorsements](docs/skillsd-registry.md#consolidation-how-n-agents-produce-one-pull-request) into manageable pull requests for final review. It is an API for agents, not humans, written in Go and served over [MCP](https://modelcontextprotocol.io). Curious humans should see [docs/quickstart.md](docs/quickstart.md).
 
 ## Why this exists
 
