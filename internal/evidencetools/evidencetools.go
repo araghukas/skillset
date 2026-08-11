@@ -128,7 +128,7 @@ func verdictEnum() []any {
 }
 
 func readOnly() *mcp.ToolAnnotations {
-	return &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptr(false)}
+	return &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: new(false)}
 }
 
 type annotationOpt func(*mcp.ToolAnnotations)
@@ -140,16 +140,14 @@ func idempotent() annotationOpt {
 func writeTool(opts ...annotationOpt) *mcp.ToolAnnotations {
 	a := &mcp.ToolAnnotations{
 		ReadOnlyHint:    false,
-		DestructiveHint: ptr(false),
-		OpenWorldHint:   ptr(false),
+		DestructiveHint: new(false),
+		OpenWorldHint:   new(false),
 	}
 	for _, opt := range opts {
 		opt(a)
 	}
 	return a
 }
-
-func ptr[T any](v T) *T { return &v }
 
 // SkillOutcomeInput is how one skill fared within the reported session.
 type SkillOutcomeInput struct {

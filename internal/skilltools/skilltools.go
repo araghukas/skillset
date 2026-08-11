@@ -51,10 +51,8 @@ func readOnly() *mcp.ToolAnnotations {
 	// ReadOnlyHint makes DestructiveHint moot, but OpenWorldHint defaults
 	// to true and must be turned off explicitly: these tools read a local
 	// index, not the open internet.
-	return &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptr(false)}
+	return &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: new(false)}
 }
-
-func ptr[T any](v T) *T { return &v }
 
 // ListSkillsInput selects and pages through the skill index.
 type ListSkillsInput struct {
@@ -163,6 +161,16 @@ func getSkill(reg *registry.Registry, defaultMaxBytes int) mcp.ToolHandlerFor[Ge
 			Content: toolresult.Skill(sk.Metadata, in.IncludeContextFiles, in.Paths, maxBytes),
 		}, nil, nil
 	}
+}
+
+func getClientGuide(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {
+	guide, ok := clientguide.Guide.ContextFile("SKILL.md")
+	if !ok {
+		return nil, nil, fmt.Errorf("the client guide is missing its SKILL.md; this is a bug in the server build")
+	}
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{toolresult.Text("%s", guide.Content)},
+	}, nil, nil
 }
 
 // Cursors are an encoded offset. The index is immutable for the lifetime of

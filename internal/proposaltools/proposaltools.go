@@ -104,7 +104,7 @@ func Add(srv *mcp.Server, deps Deps) {
 }
 
 func readOnly() *mcp.ToolAnnotations {
-	return &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptr(false)}
+	return &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: new(false)}
 }
 
 type annotationOpt func(*mcp.ToolAnnotations)
@@ -120,16 +120,14 @@ func idempotent() annotationOpt {
 func writeTool(openWorld bool, opts ...annotationOpt) *mcp.ToolAnnotations {
 	a := &mcp.ToolAnnotations{
 		ReadOnlyHint:    false,
-		DestructiveHint: ptr(false),
-		OpenWorldHint:   ptr(openWorld),
+		DestructiveHint: new(false),
+		OpenWorldHint:   new(openWorld),
 	}
 	for _, opt := range opts {
 		opt(a)
 	}
 	return a
 }
-
-func ptr[T any](v T) *T { return &v }
 
 // FileEditInput is one file's full new content within a proposal.
 type FileEditInput struct {
