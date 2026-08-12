@@ -21,9 +21,6 @@ id_ed25519*
 coverage.out
 coverage.html
 
-# --- Local dev scripts ---
-/dev-claude.sh
-
 # --- Editors / IDEs ---
 CLAUDE.md
 .claude/
