@@ -75,6 +75,11 @@ registry:
   enabled: true
   skillsRepo:
     url: "https://github.com/<org>/<skills-repo>.git"
+  # autoSubmitEndorsements is how many agents must independently propose the
+  # same fix before a PR opens; omitted here, so it takes the chart's own
+  # default of 2. Set it explicitly if you want a different threshold.
+  # A value of 0 means proposals never auto-push.
+  autoSubmitEndorsements: 2
   github:
     owner: "<org>"
     repo: "<skills-repo>"
@@ -110,14 +115,32 @@ implications of turning this on: [data-stores.md](data-stores.md).
 
 ## 3. Point an agent at it
 
-This is the only integration step — there's no SDK to install, and for an
-MCP-capable harness there isn't even a prompt to write. Add both servers as
-MCP servers, e.g.:
+The easiest option is to use an onboarding script, e.g. for Claude Code,
+[scripts/onboard-claude.sh](../scripts/onboard-claude.sh):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/araghukas/skillset/main/scripts/onboard-claude.sh | bash -s -- \
+  --scope user \
+  --skillsd-url http://skillsd.<namespace>.svc.cluster.local:8080/mcp \
+  --registry-url http://skillsd-registry.<namespace>.svc.cluster.local:8081/mcp
+```
+
+This registers the `skillsd` and `skillsd-registry` MCP servers and
+pre-approves all of their tools in the agent's permissions, by editing
+`.claude/settings.json` and `.mcp.json` in the directory where it's
+invoked.
+
+<details> <summary>Or, by hand</summary>
 
 ```bash
 claude mcp add --transport http skillsd http://skillsd.<namespace>.svc.cluster.local:8080/mcp
 claude mcp add --transport http skillsd-registry http://skillsd-registry.<namespace>.svc.cluster.local:8081/mcp
 ```
+
+With plain `claude mcp add`, both servers still connect but each tool
+prompts for permission on first use until `settings.json` is also updated.
+
+</details>
 
 ```mermaid
 sequenceDiagram
@@ -126,10 +149,10 @@ sequenceDiagram
     participant Read as skillsd :8080
     participant Write as skillsd-registry :8081
 
-    Op->>Agent: claude mcp add skillsd http://...:8080/mcp
+    Op->>Agent: onboarding script (registers servers + permissions)
     Agent->>Read: initialize
     Read-->>Agent: instructions (onboarding guide) + tools/list
-    Note over Agent: fully onboarded — no further<br/>docs, schema files, or SDK needed
+    Note over Agent: fully onboarded — no further<br/>docs, schema files, or SDK needed,<br/>no first-use permission prompts
     Agent->>Read: list_skills / get_skill ...
     Agent->>Write: propose_change / report_outcome ...
 ```

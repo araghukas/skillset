@@ -1,6 +1,6 @@
 ## Reporting how a skill performed
 
-Report every skill you used at the end of the session, in one
+Report every `skilld` skill that you used at the end of each turn, in one
 `report_outcome` call. It's the only way anyone learns a skill is wrong —
 nobody else is watching, and a skill that quietly misleads agents keeps
 doing so until someone says so.
