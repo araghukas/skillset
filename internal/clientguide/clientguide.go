@@ -50,43 +50,29 @@ func mustLoad() *skill.Metadata {
 	return md
 }
 
-// componentFiles maps each server ("skillsd" or "registry") to the
-// component-specific reference file its Instructions/get_client_guide
-// output includes, on top of the always-included files in guideFiles.
-var componentFiles = map[string]string{
-	"skillsd":  "references/skillsd.md",
-	"registry": "references/registry.md",
-}
-
 // Instructions returns the guide text to send as an MCP server's
-// ServerOptions.Instructions for the given component: "skillsd" or
-// "registry".
+// ServerOptions.Instructions.
 //
-// The embedded guide is split across explicit files rather than one
-// SKILL.md with marker comments, so a server only advertises the tools it
-// actually has: references/intro.md and references/typical-flow.md are
-// always included; componentFiles picks the one tool-specific file layered
-// between them. SKILL.md itself carries only frontmatter (required by
-// skillparse) and a pointer to references/intro.md - it is deliberately not
-// part of the assembled guide, since its raw content includes that
-// frontmatter block. An unrecognized component gets just the universal
-// files - see TestInstructionsUnknownComponentIsUniversalOnly.
+// Connect-time instructions are paid by every session that has the server
+// attached, whether or not the session uses it, so they carry only the
+// universal sections: references/intro.md (the mental model) and
+// references/typical-flow.md (the order to call things in). The per-tool
+// reference files (references/skillsd.md, references/registry.md) are
+// served by get_client_guide and the resource instead, where an agent
+// that's actually working with the tools can fetch them. SKILL.md itself
+// carries only frontmatter (required by skillparse) and a pointer to
+// references/intro.md - it is deliberately not part of the assembled
+// guide, since its raw content includes that frontmatter block.
 //
 // appendix, if non-empty, is appended verbatim after the guide sections -
 // see AddTool for why this needs to be the same string passed there. It's
 // deployment-specific content the static embedded files can't know on
-// their own: skillsd appends its skill catalog, skillsd-registry appends a
-// "Repository configuration" section naming the actual repos/branches
-// skills are read from and proposals are opened against (see
-// registryconfig.Config and cmd/skillsd-registry/main.go).
-func Instructions(component, appendix string) string {
-	paths := []string{"references/intro.md"}
-	if p, ok := componentFiles[component]; ok {
-		paths = append(paths, p)
-	}
-	paths = append(paths, "references/typical-flow.md")
-
-	text := joinContextFiles(paths)
+// their own: skillsd appends a one-line count of the skills it serves,
+// skillsd-registry appends a "Repository configuration" section naming the
+// actual repos/branches skills are read from and proposals are opened
+// against (see registryconfig.Config and cmd/skillsd-registry/main.go).
+func Instructions(appendix string) string {
+	text := joinContextFiles([]string{"references/intro.md", "references/typical-flow.md"})
 	if appendix != "" {
 		text += "\n\n" + appendix
 	}
@@ -117,10 +103,8 @@ func joinContextFiles(paths []string) string {
 func AddTool(srv *mcp.Server, appendix string) {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: "get_client_guide",
-		Description: "Read the full guide to using skillsd and skillsd-registry: which tools " +
-			"exist on each, how the propose/endorse/submit workflow fits together, and what the " +
-			"outcome verdicts mean. The same text is delivered as this server's instructions at " +
-			"connect time; call this if you need it again or did not receive it.",
+		Description: "Read the full guide to using skillsd and skillsd-registry: every tool on " +
+			"both servers, in more detail than the connect-time instructions carry.",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: falsePtr()},
 	}, getClientGuideTool(appendix))
 

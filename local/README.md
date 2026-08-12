@@ -226,10 +226,10 @@ Every other tool follows the same `tools/call` shape with its own
 `name`/`arguments` — `get_proposal`, `get_skill_at_ref`, `list_proposals`,
 `list_proposal_clusters`, and (if evidence collection is enabled)
 `report_outcome`, `list_outcome_reports`, `list_skill_signals`. Call
-`get_client_guide` on either server, or read a connected client's onboarding
-instructions, for the full argument shape and workflow each tool expects — the
-guide is generated from the same source both servers advertise at connect
-time, so it never drifts from what's actually registered.
+`get_client_guide` on either server for the full workflow each tool expects —
+argument shapes and constraints are in each tool's own description and schema
+from `tools/list`. The guide is embedded in the server binaries, so it never
+drifts from what's actually registered.
 
 ---
 

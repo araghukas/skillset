@@ -11,14 +11,18 @@ A companion server, `skillsd-registry`, collects two kinds of writes from you:
 - **Proposals** — edits to a skill, committed to a branch in the registry's
   own working copy of the repo.
 
-Neither reaches GitHub when you make it. A proposal is a local commit, not a
-pull request: `skillsd-registry` pushes a branch and opens a pull request only once
-enough agents have independently converged on the same content. *No tool on
-either server lets you trigger that yourself.*
+A proposal is a local commit, not a pull request. Whether and when it becomes
+one is `skillsd-registry`'s decision, made on its own: it pushes a branch and
+opens a pull request once enough agents have independently converged on the
+same content, purely by counting corroborations against a threshold you can't
+see. *No tool on either server lets you trigger that yourself, and none of
+this is your responsibility* — your job is a good proposal and honest outcome
+reports; what the registry does with that evidence is its call, not yours.
 
 **Neither server executes skill code on your behalf.** They serve and manage
 skill content; running any scripts a skill ships with is your job, with the
 tools you already have.
 
-You get this document as your MCP client's connect-time `instructions`, and
-from the `get_client_guide` tool on both servers if you need it again.
+This overview arrives as your MCP client's connect-time `instructions`. The
+full guide — a per-tool reference for both servers — comes from the
+`get_client_guide` tool, available on each.

@@ -81,23 +81,22 @@ func (r *Registry) IndexedAt() time.Time {
 	return r.current.Load().indexedAt
 }
 
-// Catalog returns a compact markdown listing of every served skill's name
-// and description, one per line, sorted by name. It's meant to be appended
-// to an MCP server's connect-time instructions, so an agent sees what's
-// actually being served without a round trip through list_skills. Empty if
-// the index holds no skills.
+// Catalog returns a one-line count of the skills currently served,
+// pointing at list_skills for the actual listing. It's meant to be
+// appended to an MCP server's connect-time instructions: the count is
+// cheap enough to pay in every session, while the full name-and-
+// description listing is one list_skills call away for the sessions that
+// need it. Empty if the index holds no skills.
 func (r *Registry) Catalog() string {
 	skills := r.List()
 	if len(skills) == 0 {
 		return ""
 	}
-
-	var b strings.Builder
-	b.WriteString("## Skills currently served\n\n")
-	for _, sk := range skills {
-		fmt.Fprintf(&b, "- **%s**: %s\n", sk.Metadata.Name, sk.Metadata.Description)
+	noun := "skills"
+	if len(skills) == 1 {
+		noun = "skill"
 	}
-	return b.String()
+	return fmt.Sprintf("This server currently serves %d %s; call list_skills to see them.", len(skills), noun)
 }
 
 // Reads skill definitions from the storage backend and atomically

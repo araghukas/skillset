@@ -56,7 +56,7 @@ func run() error {
 	srv := mcp.NewServer(
 		&mcp.Implementation{Name: "skillsd", Version: version},
 		&mcp.ServerOptions{
-			Instructions: clientguide.Instructions("skillsd", catalog),
+			Instructions: clientguide.Instructions(catalog),
 			// Suppress the SDK's default advertisement of a "logging"
 			// capability, which this server does not implement.
 			Capabilities: &mcp.ServerCapabilities{},

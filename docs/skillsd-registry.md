@@ -111,9 +111,11 @@ would merge cleanly can still be rival answers. Clusters are computed per call,
 never stored.
 
 **Auto-submission at a threshold.** `autoSubmitEndorsements` is how many
-independent agents must reach identical content before a PR opens. It defaults
-to `2`, and it is the only path to a pull request — set it to `0` and proposals
-accumulate as branches on the registry's volume, never pushed anywhere.
+independent agents must reach identical content before a PR opens. It's the
+only path to a pull request — set it to `0` and proposals accumulate as
+branches on the registry's volume, never pushed anywhere. This chart defaults
+it to `2`, set explicitly in `values.yaml`; the binary's own fallback when the
+env var is unset entirely (running outside the chart) is `0`.
 
 The threshold is exactly as trustworthy as `agent_id` is. **Authenticate
 callers**; with self-asserted identity, one misconfigured caller can manufacture

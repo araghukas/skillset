@@ -77,8 +77,8 @@ volume.
 | [docs/helm-chart.md](docs/helm-chart.md) | Chart structure, full values reference, GitHub auth, installation |
 
 Everything above is written for an operator. The agent-facing API reference is
-the `get_client_guide` MCP tool itself — also delivered automatically as
-server `instructions` at connect time (see
+the `get_client_guide` MCP tool itself — its universal sections are also
+delivered automatically as server `instructions` at connect time (see
 [internal/clientguide](internal/clientguide)).
 
 ## Local development

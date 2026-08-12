@@ -3,21 +3,6 @@
 Both components share one chart, [charts/skillsd](../charts/skillsd), and render
 as independent Deployments.
 
-```
-charts/skillsd/
-├── Chart.yaml
-├── values.yaml
-└── templates/
-    ├── deployment.yaml           # skillsd: skillsd-init init container + read-only main container
-    ├── service.yaml              # skillsd's ClusterIP
-    ├── deployment-registry.yaml  # skillsd-registry (guarded by registry.enabled)
-    ├── service-registry.yaml     # skillsd-registry's ClusterIP
-    ├── pvc-registry.yaml         # repo-data volume
-    ├── pvc-evidence.yaml         # evidence-data volume (guarded by registry.evidence.persistence.enabled)
-    ├── serviceaccount.yaml
-    └── _helpers.tpl
-```
-
 ## Resource graph
 
 ```mermaid
@@ -145,7 +130,7 @@ For local dev, the Tiltfile creates them for you from gitignored files; see
 | Value | Default | Env var | Description |
 |---|---|---|---|
 | `replicaCount` | `2` | — | Read-fleet replica count |
-| `image.repository` / `.tag` | `skillsd` / `latest` | — | Image for the `skillsd` container |
+| `image.repository` / `.tag` | `ghcr.io/araghukas/skillsd` / `""` | — | Image for the `skillsd` container; empty `tag` falls back to the chart's `appVersion` |
 | `httpAddr` | `:8080` | `HTTP_ADDR` | MCP (Streamable HTTP) listen address |
 | `logLevel` | `info` | `LOG_LEVEL` | Minimum slog level |
 | `maxRequestBodyMiB` | `8` | `MAX_REQUEST_BODY_BYTES` | Cap on a single incoming MCP request body |
@@ -168,7 +153,7 @@ For local dev, the Tiltfile creates them for you from gitignored files; see
 | Value | Default | Env var | Description |
 |---|---|---|---|
 | `registry.enabled` | `true` | — | Renders the registry's Deployment/Service/PVCs at all |
-| `registry.image.repository` / `.tag` | `skillsd` / `latest` | — | Same image, different entrypoint (`/skillsd-registry`) |
+| `registry.image.repository` / `.tag` | `ghcr.io/araghukas/skillsd` / `""` | — | Same image, different entrypoint (`/skillsd-registry`); empty `tag` falls back to the chart's `appVersion` |
 | `registry.httpAddr` | `:8081` | `HTTP_ADDR` | MCP (Streamable HTTP) listen address |
 | `registry.service.type` / `.port` | `ClusterIP` / `8081` | — | Registry's Service |
 | `registry.fetchInterval` | `5m` | `FETCH_INTERVAL` | Background re-fetch of the base branch |
@@ -180,7 +165,7 @@ For local dev, the Tiltfile creates them for you from gitignored files; see
 | `registry.skillsRepo.url` | `""` | `SKILLS_REPO_URL` | Clone URL — usually the same repo as `skillsRepo.url`, configured with its own credential |
 | `registry.skillsRepo.baseBranch` | `main` | `SKILLS_REPO_BASE_BRANCH` | Branch proposals fork from / PRs target |
 | `registry.skillsRepo.subPath` | `skills` | `SKILLS_SUBPATH` | Subdirectory holding skill directories |
-| `registry.autoSubmitEndorsements` | `2` | `AUTO_SUBMIT_ENDORSEMENTS` | Corroboration count that opens a PR — the only path to one; `0` keeps proposals local, see [skillsd-registry.md](skillsd-registry.md#consolidation-how-n-agents-produce-one-pull-request) |
+| `registry.autoSubmitEndorsements` | `2` | `AUTO_SUBMIT_ENDORSEMENTS` | Corroboration count that opens a PR — the only path to one; `0` keeps proposals local, see [skillsd-registry.md](skillsd-registry.md#consolidation-how-n-agents-produce-one-pull-request). `2` is this chart's default, set explicitly in `values.yaml` — the binary's own fallback when the env var is absent entirely (e.g. run outside the chart) is `0` |
 | `registry.github.owner` / `.repo` | `""` / `""` | `GITHUB_OWNER` / `GITHUB_REPO` | Target repo for pull requests |
 | `registry.github.githubApp.appId` | `""` | `GITHUB_APP_ID` | App client ID or numeric app ID |
 | `registry.github.githubApp.installationId` | `""` | `GITHUB_APP_INSTALLATION_ID` | Installation to act as |

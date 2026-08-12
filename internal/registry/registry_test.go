@@ -68,10 +68,10 @@ func TestLoadWithPrefix(t *testing.T) {
 	}
 }
 
-// TestCatalog covers the listing appended to skillsd's connect-time
-// instructions: every loaded skill's name and description should appear,
-// sorted by name, and an empty index should produce an empty string rather
-// than a heading with nothing under it.
+// TestCatalog covers the count line appended to skillsd's connect-time
+// instructions: it should state how many skills are served and point at
+// list_skills, and an empty index should produce an empty string rather
+// than a line claiming zero skills.
 func TestCatalog(t *testing.T) {
 	root := t.TempDir()
 	writeSkill(t, root, "zeta-skill", "---\nname: zeta-skill\ndescription: does zeta things\n---\nbody\n")
@@ -83,16 +83,14 @@ func TestCatalog(t *testing.T) {
 	}
 
 	got := reg.Catalog()
-	wantAlpha := strings.Index(got, "alpha-skill")
-	wantZeta := strings.Index(got, "zeta-skill")
-	if wantAlpha == -1 || wantZeta == -1 {
-		t.Fatalf("catalog missing an expected skill name: %q", got)
+	if !strings.Contains(got, "2 skills") {
+		t.Errorf("catalog does not state the skill count: %q", got)
 	}
-	if wantAlpha > wantZeta {
-		t.Errorf("catalog not sorted by name: %q", got)
+	if !strings.Contains(got, "list_skills") {
+		t.Errorf("catalog does not point at list_skills: %q", got)
 	}
-	if !strings.Contains(got, "does alpha things") || !strings.Contains(got, "does zeta things") {
-		t.Errorf("catalog missing a description: %q", got)
+	if strings.Contains(got, "does alpha things") {
+		t.Errorf("catalog should count skills, not describe them: %q", got)
 	}
 
 	if empty := New(storage.NewFSBackend(t.TempDir()), "", "").Catalog(); empty != "" {

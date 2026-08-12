@@ -101,7 +101,7 @@ func run() error {
 	srv := mcp.NewServer(
 		&mcp.Implementation{Name: "skillsd-registry", Version: version},
 		&mcp.ServerOptions{
-			Instructions: clientguide.Instructions("registry", guideAppendix),
+			Instructions: clientguide.Instructions(guideAppendix),
 			// Suppress the SDK's default advertisement of a "logging"
 			// capability, which this server does not implement.
 			Capabilities: &mcp.ServerCapabilities{},

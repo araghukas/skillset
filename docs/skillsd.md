@@ -68,34 +68,34 @@ just "the skill," which can't distinguish a fix from the bug it fixed.
 ## The client guide (`get_client_guide`, and connect-time `instructions`)
 
 An agent isn't expected to have read this file, a schema, or any
-hand-written integration doc. The onboarding guide arrives automatically as
-this server's `instructions` when an MCP client connects. For
-a client that doesn't surface `instructions`, or an agent that wants it
-again mid-session, the same content is also `get_client_guide()` (a tool)
-and `skillsd://client-guide` (a resource). All three read from one source,
-so none of them can drift from what the server actually implements.
+hand-written integration doc. Onboarding arrives automatically as this
+server's `instructions` when an MCP client connects, and the full guide is
+available on demand as `get_client_guide()` (a tool) and
+`skillsd://client-guide` (a resource). Both read from one embedded source,
+so neither can drift from what the server actually implements.
 
-The guide's static text (from `SKILL.md`, below) is followed by a **skill
-catalog**: a `## Skills currently served` section naming and describing
-every skill the running instance's `registry.Registry` holds
-(`registry.Registry.Catalog`), so an agent sees what's actually being served
-without a separate `list_skills` round trip. It's built once, from the same
-in-memory index `list_skills`/`get_skill` read, right after `registry.Load`
-at startup — so it's current as of process start, and (per "No runtime
-refresh, by design" above) stays fixed until the pod restarts, same as the
-rest of the index.
+The two delivery paths carry different amounts on purpose. Connect-time
+`instructions` are paid by every session that has the server attached, so
+they hold only the universal sections — the mental model and the typical
+call flow — plus a one-line count of the skills the running instance's
+`registry.Registry` holds (`registry.Registry.Catalog`), pointing at
+`list_skills` for the actual listing. The per-tool reference for both
+servers lives in `get_client_guide` and the resource, where an agent
+that's actually working with the tools fetches it. Everything else an
+agent needs per tool — argument shapes, verdict meanings, constraints —
+rides on the tools themselves, in their descriptions and schemas. The
+count is built once from the same in-memory index `list_skills`/`get_skill`
+read, right after `registry.Load` at startup — so it's current as of
+process start, and (per "No runtime refresh, by design" above) stays fixed
+until the pod restarts, same as the rest of the index.
 
-Its static content is
-[internal/clientguide/skillsd-client/SKILL.md](../internal/clientguide/skillsd-client/SKILL.md),
-embedded into the server binary via `go:embed` — deliberately *not* read from
-the skills repo `list_skills` indexes, since it documents the API itself: it
-ships versioned with the server binary, stays available even if the skills
-repo is empty or misconfigured, and never appears in `list_skills`'s output.
-`skillsd`'s `instructions` carry only the tools this server actually has
-(`list_skills`, `get_skill`, `get_client_guide`) — the proposal and evidence
-workflow content lives in the same source file but is filtered out for this
-server; see [skillsd-registry.md](skillsd-registry.md) for where it goes
-instead.
+The guide's static content is
+[internal/clientguide/skillsd-client/SKILL.md](../internal/clientguide/skillsd-client/SKILL.md)
+and its `references/`, embedded into the server binary via `go:embed` —
+deliberately *not* read from the skills repo `list_skills` indexes, since
+it documents the API itself: it ships versioned with the server binary,
+stays available even if the skills repo is empty or misconfigured, and
+never appears in `list_skills`'s output.
 
 **This README/docs tree and that guide serve different readers.** The guide is
 the API reference for an agent (or a human integrating one) — this doc

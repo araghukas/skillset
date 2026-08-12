@@ -156,7 +156,7 @@ type SkillOutcomeInput struct {
 	// about can't distinguish a fix from a regression.
 	SkillCommit string `json:"skill_commit" jsonschema:"the commit field from the skill's metadata, as returned by get_skill"`
 
-	Verdict string `json:"verdict" jsonschema:"one of: applied, applied_with_correction, contradicted, incomplete, not_applicable"`
+	Verdict string `json:"verdict" jsonschema:"what observably happened: applied = followed it and nothing contradicted it; applied_with_correction = followed it but had to adjust part of it; contradicted = a documented command or API turned out wrong; incomplete = on-topic but did not cover your case; not_applicable = loaded it and it turned out irrelevant"`
 
 	// Note is ignored for the "applied" verdict.
 	Note string `json:"note,omitempty" jsonschema:"what specifically went wrong - the command that failed, the instruction that was wrong. A reviewer reads this, so be concrete. Ignored for the applied verdict"`
