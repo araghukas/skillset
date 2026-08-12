@@ -1,7 +1,10 @@
 // Package proposaltools registers skillsd-registry's write-path MCP tools:
 // proposing edits to a skill, inspecting proposals and the clusters they
-// fall into, reading a skill at any ref, and submitting a proposal as a
-// pull request.
+// fall into, and reading a skill at any ref.
+//
+// No tool here opens a pull request. That happens only when a proposal
+// reaches the corroboration threshold, which the registry evaluates itself -
+// see maybeAutoSubmit.
 package proposaltools
 
 import (
@@ -21,17 +24,14 @@ type Deps struct {
 	Proposals *proposals.Service
 	Submitter *submit.Submitter
 
-	// SubmitEnabled reports whether pull requests can be opened at all. When
-	// false, submit_proposal is still registered but refuses - unlike the
-	// evidence tools, which are omitted entirely when disabled. The
-	// difference is that submission is a configuration gap an operator can
-	// close, and an agent that has just built a proposal deserves to be told
-	// that rather than left wondering where the tool went.
-	SubmitEnabled bool
+	// SubmitConfigured reports whether a forge credential, owner, and repo
+	// are all present. Without them a pull request cannot be opened, so
+	// crossing the corroboration threshold has no effect.
+	SubmitConfigured bool
 
 	// AutoSubmitThreshold is how many independent agents must arrive at
-	// identical content before a pull request is opened without anyone
-	// asking. Zero disables it.
+	// identical content before a pull request is opened for it. Zero means
+	// no pull request is ever opened and proposals stay as local branches.
 	AutoSubmitThreshold int
 
 	// DefaultMaxBytes is the context-file byte budget applied when a
@@ -56,10 +56,11 @@ func Add(srv *mcp.Server, deps Deps) {
 		Name: "propose_change",
 		Description: "Propose an edit to a skill. Send the full new content of each changed " +
 			"file, not a patch - the server computes the diff. The change lands as a commit " +
-			"on your own branch; nothing is merged and no pull request opens unless you call " +
-			"submit_proposal. If another agent's open proposal already produces byte-identical " +
-			"content, no new branch is created: you are recorded as independently corroborating " +
-			"theirs, and it is returned with deduplicated set. Cite report IDs from " +
+			"on your own branch; nothing is merged. If another agent's open proposal already " +
+			"produces byte-identical content, no new branch is created: you are recorded as " +
+			"independently corroborating theirs, and it is returned with deduplicated set. " +
+			"A pull request opens only once enough agents have independently corroborated the " +
+			"same content, which the registry decides on its own. Cite report IDs from " +
 			"list_outcome_reports in motivating_report_ids so a reviewer can see the failures " +
 			"this claims to fix.",
 		Annotations: writeTool(true),
@@ -96,15 +97,6 @@ func Add(srv *mcp.Server, deps Deps) {
 		Annotations: readOnly(),
 	}, getSkillAtRef(deps))
 
-	mcp.AddTool(srv, &mcp.Tool{
-		Name: "submit_proposal",
-		Description: "Push a proposal's branch upstream and open a pull request for human " +
-			"review. Safe to retry: if a pull request already exists for the branch, the " +
-			"existing one is returned rather than a second being opened. This is the last " +
-			"step an agent takes - merging is a human decision.",
-		Annotations: writeTool(true, idempotent()),
-	}, submitProposal(deps))
-
 	clientguide.AddTool(srv, deps.ClientGuideAppendix)
 }
 
@@ -112,26 +104,16 @@ func readOnly() *mcp.ToolAnnotations {
 	return &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: new(false)}
 }
 
-type annotationOpt func(*mcp.ToolAnnotations)
-
-func idempotent() annotationOpt {
-	return func(a *mcp.ToolAnnotations) { a.IdempotentHint = true }
-}
-
 // writeTool builds annotations for a mutating tool. DestructiveHint is set
 // explicitly because the SDK defaults it to true when left nil, and nothing
-// here is destructive: proposing appends a commit to the agent's own
-// branch, and submitting opens a pull request. Neither overwrites anything.
-func writeTool(openWorld bool, opts ...annotationOpt) *mcp.ToolAnnotations {
-	a := &mcp.ToolAnnotations{
+// here is destructive: proposing appends a commit to the agent's own branch,
+// overwriting nothing.
+func writeTool(openWorld bool) *mcp.ToolAnnotations {
+	return &mcp.ToolAnnotations{
 		ReadOnlyHint:    false,
 		DestructiveHint: new(false),
 		OpenWorldHint:   new(openWorld),
 	}
-	for _, opt := range opts {
-		opt(a)
-	}
-	return a
 }
 
 // FileEditInput is one file's full new content within a proposal.
@@ -194,23 +176,25 @@ func proposeChange(deps Deps) mcp.ToolHandlerFor[ProposeChangeInput, ProposeChan
 }
 
 // maybeAutoSubmit opens a pull request if this proposal has now been
-// corroborated by enough independent agents.
+// corroborated by enough independent agents. This is the only path to a pull
+// request: no caller can ask for one.
 //
 // Failures are logged and swallowed rather than returned: the agent's
 // contribution is already committed and corroborated, and turning a forge
-// outage into a failed propose_change would discard work that succeeded.
-// The proposal remains submittable by hand.
+// outage into a failed propose_change would discard work that succeeded. The
+// proposal stays on its branch and the next call that finds it at or above
+// the threshold retries.
 func maybeAutoSubmit(ctx context.Context, deps Deps, p *proposals.Proposal) *proposals.Submission {
-	if deps.AutoSubmitThreshold <= 0 || !deps.SubmitEnabled {
+	if deps.AutoSubmitThreshold <= 0 || !deps.SubmitConfigured {
 		return nil
 	}
 	if p.Corroboration < deps.AutoSubmitThreshold {
 		return nil
 	}
 
-	submitted, err := deps.Submitter.Submit(ctx, p, "", "")
+	submitted, err := deps.Submitter.Submit(ctx, p)
 	if err != nil {
-		slog.Error("auto-submit failed; proposal is still submittable by hand",
+		slog.Error("auto-submit failed; proposal remains on its branch and will be retried",
 			"branch", p.Branch, "corroboration", p.Corroboration, "error", err)
 		return nil
 	}
@@ -323,34 +307,5 @@ func getSkillAtRef(deps Deps) mcp.ToolHandlerFor[GetSkillAtRefInput, any] {
 		return &mcp.CallToolResult{
 			Content: toolresult.Skill(md, in.IncludeContextFiles, in.Paths, maxBytes),
 		}, nil, nil
-	}
-}
-
-// SubmitProposalInput selects a proposal to submit.
-type SubmitProposalInput struct {
-	Branch  string `json:"branch" jsonschema:"fully-qualified branch name, as returned by propose_change or list_proposals"`
-	PRTitle string `json:"pr_title,omitempty" jsonschema:"pull request title; defaulted from the proposal when omitted"`
-	PRBody  string `json:"pr_body,omitempty" jsonschema:"pull request body; defaulted when omitted, including the corroborating agents and cited outcome reports"`
-}
-
-func submitProposal(deps Deps) mcp.ToolHandlerFor[SubmitProposalInput, *proposals.Submission] {
-	return func(ctx context.Context, _ *mcp.CallToolRequest, in SubmitProposalInput) (*mcp.CallToolResult, *proposals.Submission, error) {
-		if !deps.SubmitEnabled {
-			return nil, nil, fmt.Errorf("submitting proposals is disabled on this registry: it has no forge credentials configured. " +
-				"The proposal is still committed on its branch and an operator can submit it")
-		}
-		if in.Branch == "" {
-			return nil, nil, fmt.Errorf("branch is required; call list_proposals to see the open branches")
-		}
-
-		p, err := deps.Proposals.GetProposal(ctx, in.Branch)
-		if err != nil {
-			return nil, nil, err
-		}
-		submitted, err := deps.Submitter.Submit(ctx, p, in.PRTitle, in.PRBody)
-		if err != nil {
-			return nil, nil, err
-		}
-		return nil, submitted, nil
 	}
 }

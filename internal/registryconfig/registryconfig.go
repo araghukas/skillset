@@ -59,8 +59,9 @@ type Config struct {
 	// GitHubAuth supplies the credential for both the HTTPS git clone/
 	// fetch/push and the GitHub REST API calls used to open pull requests -
 	// one credential rather than two. Nil means none was configured, which
-	// disables submit_proposal (see below) and limits the repo to public,
-	// unauthenticated access.
+	// leaves auto-submission unable to open pull requests (see
+	// SubmitConfigured below) and limits the repo to public, unauthenticated
+	// access.
 	GitHubAuth githubauth.TokenSource
 
 	// GitHubAuthMode records which scheme GitHubAuth came from, for
@@ -77,21 +78,23 @@ type Config struct {
 	// Enterprise deployments.
 	GitHubAPIBaseURL string
 
-	// SubmitProposalEnabled controls whether the submit_proposal tool is
-	// allowed to push branches and open pull requests. It's the
-	// SUBMIT_PROPOSAL_ENABLED env var (default true) AND-ed with whether
-	// GitHub auth (a credential, plus owner/repo) is actually configured.
-	SubmitProposalEnabled bool
+	// SubmitConfigured reports whether pushing a branch and opening a pull
+	// request is possible at all: a credential, an owner, and a repo. It is
+	// derived from those three rather than set on its own, since there is no
+	// useful configuration where they are present and submission is not
+	// wanted - AutoSubmitEndorsements is where that choice is made.
+	SubmitConfigured bool
 
 	// AutoSubmitEndorsements is how many agents must independently arrive
-	// at identical content before a pull request is opened for it without
-	// anyone asking. Zero (the default) disables auto-submission entirely.
+	// at identical content before a pull request is opened for it. It is
+	// the only path to a pull request: no tool lets a caller ask for one.
+	// Zero means proposals accumulate as local branches and are never
+	// pushed anywhere.
 	//
-	// This is the only setting that lets the registry act on its own, and
-	// it is exactly as trustworthy as agent_id is: with self-asserted
-	// identities, one misbehaving caller can manufacture a threshold's
-	// worth of agreement by itself. Enable it once callers are
-	// authenticated, not before.
+	// The threshold is exactly as trustworthy as agent_id is: with
+	// self-asserted identities, one misbehaving caller can manufacture a
+	// threshold's worth of agreement by itself. Size it for callers you
+	// have authenticated.
 	AutoSubmitEndorsements int
 
 	// FetchInterval is how often the base branch is re-fetched from
@@ -162,10 +165,6 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("parsing MAX_RESULT_BYTES: %w", err)
 	}
-	submitProposalRequested, err := getenvBool("SUBMIT_PROPOSAL_ENABLED", true)
-	if err != nil {
-		return Config{}, fmt.Errorf("parsing SUBMIT_PROPOSAL_ENABLED: %w", err)
-	}
 	autoSubmitEndorsements, err := getenvInt("AUTO_SUBMIT_ENDORSEMENTS", 0)
 	if err != nil {
 		return Config{}, fmt.Errorf("parsing AUTO_SUBMIT_ENDORSEMENTS: %w", err)
@@ -226,11 +225,10 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("SKILLS_REPO_URL is required")
 	}
 
-	// GitHub auth is only required for submit_proposal (pushing + opening a
-	// PR), not for the rest of the service. Rather than fail to start when
-	// it's absent, disable submit_proposal.
-	cfg.SubmitProposalEnabled = submitProposalRequested &&
-		cfg.GitHubAuth != nil && cfg.GitHubOwner != "" && cfg.GitHubRepo != ""
+	// GitHub auth is only required for pushing a branch and opening a pull
+	// request, not for the rest of the service. Rather than fail to start
+	// when it's absent, run without a path to the forge.
+	cfg.SubmitConfigured = cfg.GitHubAuth != nil && cfg.GitHubOwner != "" && cfg.GitHubRepo != ""
 
 	return cfg, nil
 }

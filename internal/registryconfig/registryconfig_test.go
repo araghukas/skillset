@@ -84,22 +84,22 @@ func TestLoadRequiresSkillsRepoURL(t *testing.T) {
 	}
 }
 
-func TestLoadEnablesSubmitProposalWhenGitHubAuthPresent(t *testing.T) {
+func TestLoadMarksSubmitConfiguredWhenGitHubAuthPresent(t *testing.T) {
 	setRequiredEnv(t)
 
 	cfg, err := Load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !cfg.SubmitProposalEnabled {
-		t.Fatal("expected SubmitProposalEnabled to be true when GitHub auth is fully configured")
+	if !cfg.SubmitConfigured {
+		t.Fatal("expected SubmitConfigured to be true when GitHub auth is fully configured")
 	}
 	if cfg.GitHubAuthMode != githubauth.ModeToken {
 		t.Errorf("expected mode %s, got %s", githubauth.ModeToken, cfg.GitHubAuthMode)
 	}
 }
 
-func TestLoadEnablesSubmitProposalWithGitHubApp(t *testing.T) {
+func TestLoadMarksSubmitConfiguredWithGitHubApp(t *testing.T) {
 	setRequiredEnv(t)
 	setAppEnv(t)
 
@@ -107,8 +107,8 @@ func TestLoadEnablesSubmitProposalWithGitHubApp(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !cfg.SubmitProposalEnabled {
-		t.Fatal("expected SubmitProposalEnabled to be true when a GitHub App is configured")
+	if !cfg.SubmitConfigured {
+		t.Fatal("expected SubmitConfigured to be true when a GitHub App is configured")
 	}
 	if cfg.GitHubAuthMode != githubauth.ModeGitHubApp {
 		t.Errorf("expected mode %s, got %s", githubauth.ModeGitHubApp, cfg.GitHubAuthMode)
@@ -120,8 +120,8 @@ func TestLoadEnablesSubmitProposalWithGitHubApp(t *testing.T) {
 
 func TestLoadFailsOnIncompleteGitHubApp(t *testing.T) {
 	// A half-configured app is always a mistake. Unlike a missing token it
-	// fails startup outright rather than silently degrading to
-	// propose-only mode, which would look like a working deployment.
+	// fails startup outright rather than silently degrading to a deployment
+	// that can never open a pull request, which would look like it works.
 	setRequiredEnv(t)
 	setAppEnv(t)
 	t.Setenv("GITHUB_APP_INSTALLATION_ID", "")
@@ -131,7 +131,7 @@ func TestLoadFailsOnIncompleteGitHubApp(t *testing.T) {
 	}
 }
 
-func TestLoadDisablesSubmitProposalWhenGitHubAuthMissing(t *testing.T) {
+func TestLoadClearsSubmitConfiguredWhenGitHubAuthMissing(t *testing.T) {
 	setRequiredEnv(t)
 	t.Setenv("GITHUB_TOKEN", "")
 
@@ -139,23 +139,29 @@ func TestLoadDisablesSubmitProposalWhenGitHubAuthMissing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.SubmitProposalEnabled {
-		t.Fatal("expected SubmitProposalEnabled to be false when no credential is configured")
+	if cfg.SubmitConfigured {
+		t.Fatal("expected SubmitConfigured to be false when no credential is configured")
 	}
 	if cfg.GitHubAuth != nil {
 		t.Errorf("expected a nil TokenSource, got %#v", cfg.GitHubAuth)
 	}
 }
 
-func TestLoadDisablesSubmitProposalWhenExplicitlyDisabled(t *testing.T) {
+// TestLoadClearsSubmitConfiguredWithoutOwnerOrRepo covers the other half of
+// the requirement: a credential alone names no repository to open a pull
+// request against.
+func TestLoadClearsSubmitConfiguredWithoutOwnerOrRepo(t *testing.T) {
 	setRequiredEnv(t)
-	t.Setenv("SUBMIT_PROPOSAL_ENABLED", "false")
+	t.Setenv("GITHUB_REPO", "")
 
 	cfg, err := Load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.SubmitProposalEnabled {
-		t.Fatal("expected SubmitProposalEnabled to be false when SUBMIT_PROPOSAL_ENABLED=false")
+	if cfg.SubmitConfigured {
+		t.Fatal("expected SubmitConfigured to be false when GITHUB_REPO is unset")
+	}
+	if cfg.GitHubAuth == nil {
+		t.Error("expected the credential itself to still load")
 	}
 }

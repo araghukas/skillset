@@ -83,7 +83,7 @@ func TestToolsListNamesExpectedTools(t *testing.T) {
 		got := toolNames(t, session)
 		for _, want := range []string{
 			"propose_change", "list_proposals", "get_proposal",
-			"list_proposal_clusters", "get_skill_at_ref", "submit_proposal",
+			"list_proposal_clusters", "get_skill_at_ref",
 			"get_client_guide",
 		} {
 			if !got[want] {

@@ -47,13 +47,13 @@ flowchart TB
 
   subgraph K8s["Kubernetes cluster"]
     Read["skillsd\nread fleet, N replicas\nMCP: list_skills, get_skill, get_client_guide"]
-    Write["skillsd-registry\nwrite path, 1 replica\nMCP: propose_change, submit_proposal, report_outcome, …"]
+    Write["skillsd-registry\nwrite path, 1 replica\nMCP: propose_change, report_outcome, …"]
   end
 
   Forge[("Git forge\nGitHub, Gitea, …\nskills repo · pull requests")]
 
   Agent -- "discover, read" --> Read
-  Agent -- "propose, submit" --> Write
+  Agent -- "propose" --> Write
   Agent -- "report, query signals" --> Write
 
   Forge -- "clone, read-only" --> Read
@@ -92,7 +92,7 @@ make dev
 
 The default requires no GitHub account: `make dev` bootstraps a throwaway
 Gitea instance in the cluster (via `gitea-up`) and points both components at
-it, so the full read + propose + submit-PR path works offline.
+it, so the full read + propose + auto-submitted-PR path works offline.
 
 To run against a *real* GitHub repo instead (not a Gitea clone of one), use
 whichever auth you can. Both modes skip the Gitea bootstrap, since `gitea-up`

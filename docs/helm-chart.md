@@ -84,7 +84,7 @@ Both components authenticate the same way — an HTTPS clone URL plus a credenti
 | Needs | `git clone` only | `git push` **and** the GitHub REST API (PR creation) |
 | Values | `skillsRepo.githubApp.*` / `skillsRepo.tokenSecret` | `registry.github.githubApp.*` / `registry.github.tokenSecret` |
 | Minimum permissions | `Contents: Read` | `Contents: Read and write` + `Pull requests: Read and write` |
-| If unset | Fine for a public repo — no auth needed | Runs propose-only: `propose_change`/`get_proposal`/etc. still work, `submit_proposal` is disabled |
+| If unset | Fine for a public repo — no auth needed | All tools still work, but no pull request can ever open: proposals stay as local branches |
 
 The chart itself enforces no scoping: it passes each component whatever
 credential you name, and every permission boundary lives on GitHub's side, in
@@ -180,13 +180,12 @@ For local dev, the Tiltfile creates them for you from gitignored files; see
 | `registry.skillsRepo.url` | `""` | `SKILLS_REPO_URL` | Clone URL — usually the same repo as `skillsRepo.url`, configured with its own credential |
 | `registry.skillsRepo.baseBranch` | `main` | `SKILLS_REPO_BASE_BRANCH` | Branch proposals fork from / PRs target |
 | `registry.skillsRepo.subPath` | `skills` | `SKILLS_SUBPATH` | Subdirectory holding skill directories |
-| `registry.submitProposalEnabled` | `true` | `SUBMIT_PROPOSAL_ENABLED` | Gates the push+PR step in `SubmitProposal` |
-| `registry.autoSubmitEndorsements` | `0` | `AUTO_SUBMIT_ENDORSEMENTS` | Corroboration count that auto-opens a PR — off by default, see [skillsd-registry.md](skillsd-registry.md#consolidation-how-n-agents-produce-one-pull-request) |
+| `registry.autoSubmitEndorsements` | `2` | `AUTO_SUBMIT_ENDORSEMENTS` | Corroboration count that opens a PR — the only path to one; `0` keeps proposals local, see [skillsd-registry.md](skillsd-registry.md#consolidation-how-n-agents-produce-one-pull-request) |
 | `registry.github.owner` / `.repo` | `""` / `""` | `GITHUB_OWNER` / `GITHUB_REPO` | Target repo for pull requests |
 | `registry.github.githubApp.appId` | `""` | `GITHUB_APP_ID` | App client ID or numeric app ID |
 | `registry.github.githubApp.installationId` | `""` | `GITHUB_APP_INSTALLATION_ID` | Installation to act as |
 | `registry.github.githubApp.privateKeySecret` | `""` | — | Secret (key `private-key.pem`), mounted at `/etc/github-app` |
-| `registry.github.tokenSecret` | `""` | `GITHUB_TOKEN` | Secret (key `token`); no credential at all ⇒ propose-only mode |
+| `registry.github.tokenSecret` | `""` | `GITHUB_TOKEN` | Secret (key `token`); no credential at all ⇒ proposals are never pushed |
 | `registry.github.apiBaseURL` | `https://api.github.com` | `GITHUB_API_BASE_URL` | Override for GitHub Enterprise (and the local Gitea stand-in) |
 | `registry.resources` | `{}` | — | Pod resource requests/limits |
 

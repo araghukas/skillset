@@ -91,8 +91,9 @@ podSecurityContext:
 
 # registry configures the skillsd-registry component: a single-replica,
 # persistent write path that lets AI agents propose changes to skills as git
-# commits and submit them as GitHub pull requests for human review, and that
-# collects the outcome reports backing those proposals (see evidence below).
+# commits, turns the proposals enough agents agree on into GitHub pull
+# requests for human review, and collects the outcome reports backing those
+# proposals (see evidence below).
 #
 # Deployed by default. Setting enabled: false drops it entirely, leaving the
 # read-only skillsd fleet above to run standalone - a read-only deployment
@@ -155,26 +156,23 @@ registry:
     # directories actually live. Leave empty if skills sit at the repo root.
     subPath: skills
 
-  # submitProposalEnabled controls whether the submit_proposal tool is
-  # allowed to push a proposal's branch and open a pull request.
-  # propose_change, get_proposal, list_proposals, and get_skill_at_ref all
-  # work regardless - this only gates the final push+PR step. Setting it
-  # false is the explicit way to run propose-only; configuring no
-  # credential under github below has the same effect implicitly.
-  submitProposalEnabled: true
-
   # autoSubmitEndorsements is how many agents must independently arrive at
-  # byte-identical content before a pull request is opened for it with
-  # nobody asking. When a second agent proposes content that already exists,
-  # it doesn't get its own branch: it's recorded as an endorsement of the
-  # first, and this counts those endorsements.
+  # byte-identical content before a pull request is opened for it. When a
+  # second agent proposes content that already exists, it doesn't get its own
+  # branch: it's recorded as an endorsement of the first, and this counts
+  # those endorsements.
   #
-  # 0 (the default) disables it, and that default is deliberate. This is the
-  # only setting that lets the registry act on its own, and it is exactly as
-  # trustworthy as agent_id is - with self-asserted identities, a single
-  # misconfigured caller can manufacture a threshold's worth of agreement by
-  # itself. Turn it on once callers are authenticated.
-  autoSubmitEndorsements: 0
+  # This is the only path to a pull request. No MCP tool lets an agent ask
+  # for one, so a proposal reaches a human reviewer by corroboration or not
+  # at all. Set to 0 and proposals accumulate as branches in repoData below,
+  # never pushed anywhere - a reasonable choice only if you intend to collect
+  # proposals and act on them by hand.
+  #
+  # The threshold is exactly as trustworthy as agent_id is: with
+  # self-asserted identities, a single misconfigured caller can manufacture a
+  # threshold's worth of agreement by itself. Size it for callers you have
+  # authenticated.
+  autoSubmitEndorsements: 2
 
   # evidence configures the evidence tools (report_outcome,
   # list_skill_signals, list_outcome_reports): the store of agent outcome
@@ -236,7 +234,7 @@ registry:
 
   github:
     # owner/repo identify the GitHub repository pull requests are opened
-    # against. Required only if submitProposalEnabled is true.
+    # against. Required for any pull request to open at all.
     owner: ""
     repo: ""
 
@@ -246,9 +244,10 @@ registry:
     # pull-request API call. Set githubApp (recommended) or tokenSecret, not
     # both.
     #
-    # Leaving both empty runs in propose-only mode (SubmitProposal
-    # disabled), which is viable only against a public repo - a private one
-    # still needs a credential here just to clone and fetch.
+    # Leaving both empty means proposals are committed locally and never
+    # pushed, no matter how many agents corroborate them. That is viable only
+    # against a public repo - a private one still needs a credential here
+    # just to clone and fetch.
     #
     # Whichever is used needs write access here, unlike skillsRepo above:
     # "Contents: Read and write" plus "Pull requests: Read and write". It can

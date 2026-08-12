@@ -33,7 +33,7 @@ type testRig struct {
 	ghCalls *int
 }
 
-func newTestRig(t *testing.T, submitEnabled bool, autoSubmitThreshold int) testRig {
+func newTestRig(t *testing.T, submitConfigured bool, autoSubmitThreshold int) testRig {
 	t.Helper()
 
 	seedDir := t.TempDir()
@@ -93,7 +93,7 @@ func newTestRig(t *testing.T, submitEnabled bool, autoSubmitThreshold int) testR
 		deps: Deps{
 			Proposals:           svc,
 			Submitter:           submit.New(svc, client, branch),
-			SubmitEnabled:       submitEnabled,
+			SubmitConfigured:    submitConfigured,
 			AutoSubmitThreshold: autoSubmitThreshold,
 		},
 		ghCalls: &calls,
@@ -151,11 +151,11 @@ func decodeStructured(t *testing.T, res *mcp.CallToolResult, into any) {
 }
 
 // TestFullProposalWorkflow exercises the entire path an agent takes over
-// the real MCP protocol: propose a change, read it back, and submit it as
-// a pull request. This is the end-to-end confirmation that the tool layer,
-// the domain layer, and the underlying git repository actually cooperate -
-// the individual pieces are covered elsewhere, but only this test proves
-// the whole chain works through the protocol these tools are served over.
+// the real MCP protocol: propose a change, list it, and read it back with
+// its diff. This is the end-to-end confirmation that the tool layer, the
+// domain layer, and the underlying git repository actually cooperate - the
+// individual pieces are covered elsewhere, but only this test proves the
+// whole chain works through the protocol these tools are served over.
 func TestFullProposalWorkflow(t *testing.T) {
 	rig := newTestRig(t, true, 0)
 	cs := connect(t, rig.deps)
@@ -226,40 +226,31 @@ func TestFullProposalWorkflow(t *testing.T) {
 		t.Errorf("MotivatingReportIDs = %v, want [report-1]", got.MotivatingReportIDs)
 	}
 
-	// submit_proposal opens a pull request.
-	res, err = cs.CallTool(ctx, &mcp.CallToolParams{
-		Name:      "submit_proposal",
-		Arguments: map[string]any{"branch": branch},
-	})
-	if err != nil {
-		t.Fatal(err)
+	// A single agent below the threshold reaches no forge at all: the
+	// proposal exists only as a local branch.
+	if *rig.ghCalls != 0 {
+		t.Errorf("no pull request should have been opened; forge calls = %d", *rig.ghCalls)
 	}
-	var submitted proposals.Submission
-	decodeStructured(t, res, &submitted)
-	if submitted.PullRequestURL == "" {
-		t.Fatal("submit_proposal returned no pull request URL")
-	}
-	if *rig.ghCalls != 1 {
-		t.Fatalf("expected 1 call to the forge, got %d", *rig.ghCalls)
-	}
+}
 
-	// Submitting again returns the same pull request rather than opening a
-	// second one - the idempotency the tool's annotation advertises.
-	res, err = cs.CallTool(ctx, &mcp.CallToolParams{
-		Name:      "submit_proposal",
-		Arguments: map[string]any{"branch": branch},
-	})
+// TestNoToolOpensPullRequests pins the guarantee the tool surface makes:
+// corroboration is the only thing that reaches the forge, so nothing an
+// agent can call is allowed to push a branch or open a pull request.
+func TestNoToolOpensPullRequests(t *testing.T) {
+	rig := newTestRig(t, true, 0)
+	cs := connect(t, rig.deps)
+
+	tools, err := cs.ListTools(context.Background(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var resubmitted proposals.Submission
-	decodeStructured(t, res, &resubmitted)
-	if resubmitted.PullRequestURL != submitted.PullRequestURL {
-		t.Errorf("resubmitting returned a different pull request: %q vs %q",
-			resubmitted.PullRequestURL, submitted.PullRequestURL)
-	}
-	if *rig.ghCalls != 1 {
-		t.Errorf("resubmitting should not call the forge again; calls = %d", *rig.ghCalls)
+	for _, tool := range tools.Tools {
+		switch tool.Name {
+		case "propose_change", "list_proposals", "get_proposal",
+			"list_proposal_clusters", "get_skill_at_ref", "get_client_guide":
+		default:
+			t.Errorf("unexpected tool registered: %q", tool.Name)
+		}
 	}
 }
 
@@ -316,16 +307,20 @@ func TestProposeChangeDeduplicatesIdenticalContent(t *testing.T) {
 	}
 }
 
-// TestProposeChangeAutoSubmitsAtThreshold covers the one behavior that
-// fires without anyone asking: enough independent corroboration opens a
-// pull request on its own.
+// TestProposeChangeAutoSubmitsAtThreshold covers the only path to a pull
+// request: enough independent corroboration opens one, with nobody asking.
+//
+// The third agent matters as much as the second. Every call that lands on
+// an already-submitted proposal finds it at or above the threshold, so the
+// submit path is re-entered repeatedly and must return the existing pull
+// request rather than opening another.
 func TestProposeChangeAutoSubmitsAtThreshold(t *testing.T) {
 	rig := newTestRig(t, true, 2)
 	cs := connect(t, rig.deps)
 	ctx := context.Background()
 
 	fixed := validSkillMD("frontend-design", "the corrected description")
-	for i, agent := range []string{"agent-1", "agent-2"} {
+	for i, agent := range []string{"agent-1", "agent-2", "agent-3"} {
 		res, err := cs.CallTool(ctx, &mcp.CallToolParams{
 			Name: "propose_change",
 			Arguments: map[string]any{
@@ -345,13 +340,13 @@ func TestProposeChangeAutoSubmitsAtThreshold(t *testing.T) {
 			if out.AutoSubmitted != nil {
 				t.Fatal("should not auto-submit before the threshold is reached")
 			}
-		} else {
-			if out.AutoSubmitted == nil {
-				t.Fatal("should auto-submit once corroboration reaches the threshold")
-			}
-			if out.AutoSubmitted.PullRequestURL == "" {
-				t.Error("auto-submitted response has no pull request URL")
-			}
+			continue
+		}
+		if out.AutoSubmitted == nil {
+			t.Fatalf("%s: should auto-submit once corroboration reaches the threshold", agent)
+		}
+		if out.AutoSubmitted.PullRequestURL == "" {
+			t.Errorf("%s: auto-submitted response has no pull request URL", agent)
 		}
 	}
 	if *rig.ghCalls != 1 {
@@ -359,38 +354,36 @@ func TestProposeChangeAutoSubmitsAtThreshold(t *testing.T) {
 	}
 }
 
-func TestSubmitProposalDisabled(t *testing.T) {
-	rig := newTestRig(t, false, 0)
+// TestAutoSubmitWithoutCredentialsStaysLocal covers a registry that has a
+// threshold but nothing to submit with. Proposals still commit and still
+// corroborate; they just never leave the volume.
+func TestAutoSubmitWithoutCredentialsStaysLocal(t *testing.T) {
+	rig := newTestRig(t, false, 2)
 	cs := connect(t, rig.deps)
 	ctx := context.Background()
 
-	res, err := cs.CallTool(ctx, &mcp.CallToolParams{
-		Name: "propose_change",
-		Arguments: map[string]any{
-			"skill_name":  "frontend-design",
-			"agent_id":    "agent-1",
-			"proposal_id": "fix",
-			"files":       []map[string]any{{"file_path": "SKILL.md", "content": validSkillMD("frontend-design", "fixed")}},
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var out ProposeChangeOutput
-	decodeStructured(t, res, &out)
-
-	res, err = cs.CallTool(ctx, &mcp.CallToolParams{
-		Name:      "submit_proposal",
-		Arguments: map[string]any{"branch": out.Proposal.Branch},
-	})
-	if err != nil {
-		t.Fatalf("submit_proposal produced a protocol error rather than a tool error: %v", err)
-	}
-	if !res.IsError {
-		t.Fatal("submit_proposal should refuse when disabled")
+	fixed := validSkillMD("frontend-design", "the corrected description")
+	for _, agent := range []string{"agent-1", "agent-2"} {
+		res, err := cs.CallTool(ctx, &mcp.CallToolParams{
+			Name: "propose_change",
+			Arguments: map[string]any{
+				"skill_name":  "frontend-design",
+				"agent_id":    agent,
+				"proposal_id": "fix",
+				"files":       []map[string]any{{"file_path": "SKILL.md", "content": fixed}},
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out ProposeChangeOutput
+		decodeStructured(t, res, &out)
+		if out.AutoSubmitted != nil {
+			t.Fatalf("%s: reported a pull request with no credentials configured", agent)
+		}
 	}
 	if *rig.ghCalls != 0 {
-		t.Error("no pull request should have been opened")
+		t.Errorf("no pull request should have been opened; forge calls = %d", *rig.ghCalls)
 	}
 }
 
@@ -515,21 +508,15 @@ func TestToolAnnotationsMatchTheirGuarantees(t *testing.T) {
 		byName[tool.Name] = tool
 	}
 
-	for _, name := range []string{"submit_proposal", "report_outcome"} {
-		if name == "report_outcome" {
-			continue // registered by evidencetools, not this package
-		}
-		tool, ok := byName[name]
-		if !ok {
-			t.Errorf("%s not registered", name)
-			continue
-		}
-		if !tool.Annotations.IdempotentHint {
-			t.Errorf("%s should be marked idempotent: it checks for an existing pull request before opening one", name)
-		}
-		if tool.Annotations.DestructiveHint == nil || *tool.Annotations.DestructiveHint {
-			t.Errorf("%s should explicitly set DestructiveHint=false (the SDK defaults it to true)", name)
-		}
+	tool, ok := byName["propose_change"]
+	if !ok {
+		t.Fatal("propose_change not registered")
+	}
+	if tool.Annotations.ReadOnlyHint {
+		t.Error("propose_change writes a commit and must not be marked read-only")
+	}
+	if tool.Annotations.DestructiveHint == nil || *tool.Annotations.DestructiveHint {
+		t.Error("propose_change should explicitly set DestructiveHint=false (the SDK defaults it to true)")
 	}
 
 	for _, name := range []string{"list_proposals", "get_proposal", "list_proposal_clusters", "get_skill_at_ref"} {

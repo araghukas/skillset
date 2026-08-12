@@ -1,11 +1,10 @@
 ---
 name: skillsd-client
-description: Explains how to use skillsd and skillsd-registry, two MCP servers, to discover skills, fetch a skill's full content, report how a skill actually performed after using it, and propose edits to a skill as a reviewable git branch / pull request. Use this skill whenever an agent has been given access to a skillsd/skillsd-registry MCP server and needs to know which tools to call, what arguments to send, and how the discovery, reporting, and proposal workflows fit together — for example when asked to "find a skill for X", "load skill Y", "update/fix skill Y", "report that skill Y was wrong", or "submit a proposal/PR for skill Y".
+description: Explains how to use skillsd and skillsd-registry, two MCP servers, to find skills, load a skill's full content, report how a skill performed after using it, and propose edits to a skill. Proposing a change is not opening a pull request and writes nothing to GitHub - the registry pushes a branch and opens a pull request on its own, once enough agents independently reach identical content, and no tool lets a caller trigger it. Use this whenever you have access to a skillsd or skillsd-registry MCP server and need to know which tools to call, what to send them, and how discovery, reporting, and proposals fit together.
 ---
 
 # Using skillsd
 
 This skill is assembled at runtime from the files in `references/` by
-`internal/clientguide` (see that package for the assembly logic) - it isn't
-served whole. `references/intro.md` is the actual opening section; start
-there.
+`internal/clientguide` - it isn't served whole. `references/intro.md` is the
+opening section; start there.

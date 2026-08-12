@@ -81,12 +81,25 @@ func TestInstructionsAreDisjointByComponent(t *testing.T) {
 		}
 	}
 
-	for _, tool := range []string{"propose_change(", "report_outcome(", "submit_proposal("} {
+	for _, tool := range []string{"propose_change(", "report_outcome(", "get_proposal("} {
 		if !strings.Contains(registryOnly.Content, tool) {
 			t.Errorf("registry file does not mention %q", tool)
 		}
 		if strings.Contains(skillsdOnly.Content, tool) {
 			t.Errorf("skillsd file mentions %q, which is not one of its tools", tool)
+		}
+	}
+}
+
+// TestGuideAdvertisesNoSubmitTool guards the guide against describing a tool
+// agents cannot call. Opening a pull request is the registry's decision, and
+// the text an agent reads has to say so - a guide that offers a submit call
+// sends agents looking for one that was never served.
+func TestGuideAdvertisesNoSubmitTool(t *testing.T) {
+	for _, component := range []string{"skillsd", "registry"} {
+		guide := Instructions(component, "")
+		if strings.Contains(guide, "submit_proposal") {
+			t.Errorf("%s guide advertises a submit_proposal tool, which no server registers", component)
 		}
 	}
 }
@@ -147,7 +160,7 @@ func TestInstructionsAppendsCatalog(t *testing.T) {
 func TestInstructionsAppendsRepoConfigSection(t *testing.T) {
 	section := "## Repository configuration\n\n" +
 		"- Skills are read from, and proposals are forked from, https://github.com/acme/skills.git on branch \"main\".\n" +
-		"- submit_proposal opens pull requests against https://github.com/acme/skills, targeting branch \"main\".\n"
+		"- Corroborated proposals open pull requests against https://github.com/acme/skills, targeting branch \"main\".\n"
 	got := Instructions("registry", section)
 	if !strings.Contains(got, "https://github.com/acme/skills.git") {
 		t.Errorf("expected source repo URL in registry instructions, got: %q", got)

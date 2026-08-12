@@ -224,8 +224,8 @@ not a bug.)
 
 Every other tool follows the same `tools/call` shape with its own
 `name`/`arguments` — `get_proposal`, `get_skill_at_ref`, `list_proposals`,
-`list_proposal_clusters`, `submit_proposal`, and (if evidence collection is
-enabled) `report_outcome`, `list_outcome_reports`, `list_skill_signals`. Call
+`list_proposal_clusters`, and (if evidence collection is enabled)
+`report_outcome`, `list_outcome_reports`, `list_skill_signals`. Call
 `get_client_guide` on either server, or read a connected client's onboarding
 instructions, for the full argument shape and workflow each tool expects — the
 guide is generated from the same source both servers advertise at connect
@@ -254,16 +254,16 @@ against outside `make dev` / a real cluster.
 |---|---|
 | `health_test.go` | `/healthz` on both servers, `initialize`'s `instructions`, `tools/list` naming the expected tools |
 | `skills_test.go` | `list_skills`, `get_skill` (found + not-found), `get_client_guide` |
-| `proposals_test.go` | `propose_change` → `get_proposal` → `get_skill_at_ref` → `list_proposals` → `list_proposal_clusters` → `submit_proposal` |
+| `proposals_test.go` | `propose_change` → `get_proposal` → `get_skill_at_ref` → `list_proposals` → `list_proposal_clusters`, plus driving enough corroborating agents to make the registry open a pull request |
 | `evidence_test.go` | `report_outcome` (including idempotent replay), `list_outcome_reports`, `list_skill_signals` |
 
 Each file is independently runnable (`go test -tags e2e -run TestGetSkill
 ./local/verify/...`) and safely repeatable: the proposal test mints a
 timestamp-suffixed `proposal_id` each run, so it never hits the "clean
-working tree" error above. Tests covering an optional feature
-(`submit_proposal` when `submitProposalEnabled: false`, the evidence tools
-when disabled) call `t.Skip`, so `make verify` reflects what's actually
-enabled rather than failing on it.
+working tree" error above. Tests covering an optional feature (the
+auto-submitted pull request, which needs `autoSubmitEndorsements` set and a
+GitHub credential configured; the evidence tools when disabled) call `t.Skip`,
+so `make verify` reflects what's actually enabled rather than failing on it.
 
 They default to `SKILL_NAME=internal-comms` and the standard 8080/8081
 port-forwards - override `SKILL_NAME` if your seed repo has no such skill, and

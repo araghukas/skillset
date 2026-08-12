@@ -2,12 +2,10 @@
 // reporting how a skill fared in a session, and reading the aggregated
 // signal back.
 //
-// Add is called only when evidence collection is enabled. Unlike
-// submit_proposal, which stays registered and refuses when misconfigured,
-// these tools are simply absent from tools/list when evidence is off - the
-// old gRPC EvidenceService returned Unimplemented for the same case, a
-// distinction MCP has no equivalent for and doesn't need: a tool that
-// isn't there is the more direct signal.
+// Add is called only when evidence collection is enabled, so these tools
+// are simply absent from tools/list when it is off rather than registered
+// and failing. A tool that isn't there is the more direct signal: an agent
+// sees no report_outcome at all instead of discovering it errors.
 package evidencetools
 
 import (

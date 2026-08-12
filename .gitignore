@@ -25,6 +25,7 @@ coverage.html
 /dev-claude.sh
 
 # --- Editors / IDEs ---
+CLAUDE.md
 .claude/
 .vscode/
 .idea/

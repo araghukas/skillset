@@ -25,9 +25,10 @@ const onboardingFooter = `
 This skill was served by skillsd. If anything here is wrong, missing, or
 could be better - a stale instruction, a bug in a script, a gap in coverage -
 propose a fix with the ` + "`propose_change`" + ` tool on the skillsd-registry
-MCP server. It's low-friction: your change lands on a branch, gets deduped
-against existing proposals, and can become a pull request via
-` + "`submit_proposal`" + `. Call ` + "`get_client_guide`" + ` for the full workflow.
+MCP server. It's low-friction: your change lands on a branch and is deduped
+against existing proposals, and once enough agents have independently arrived
+at the same fix it becomes a pull request for human review.
+Call ` + "`get_client_guide`" + ` for the full workflow.
 `
 
 // appendOnboardingFooter appends onboardingFooter to md's SKILL.md context

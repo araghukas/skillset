@@ -1,10 +1,10 @@
 //go:build e2e
 
 // Drives one full proposal lifecycle against skillsd-registry's proposal
-// tools: propose a change, inspect it, read the skill at that ref, list
-// it back, cluster it, and (if submit_proposal is enabled on this
-// deployment) submit it and confirm the resulting pull request URL comes
-// back.
+// tools: propose a change, inspect it, read the skill at that ref, list it
+// back, and cluster it. A second test drives enough independent agents at
+// identical content to cross the deployment's corroboration threshold and
+// confirms the pull request the registry opens on its own.
 package verify
 
 import (
@@ -17,14 +17,18 @@ import (
 
 type proposeChangeOutput struct {
 	Proposal struct {
-		Branch  string `json:"branch"`
-		HeadSHA string `json:"head_sha"`
-		Diff    string `json:"diff"`
-		Commits []struct {
+		Branch        string `json:"branch"`
+		HeadSHA       string `json:"head_sha"`
+		Diff          string `json:"diff"`
+		Corroboration int    `json:"corroboration"`
+		Commits       []struct {
 			SHA string `json:"sha"`
 		} `json:"commits"`
 	} `json:"proposal"`
-	Deduplicated bool `json:"deduplicated"`
+	Deduplicated  bool `json:"deduplicated"`
+	AutoSubmitted *struct {
+		PullRequestURL string `json:"pull_request_url"`
+	} `json:"auto_submitted"`
 }
 
 type getProposalOutput struct {
@@ -41,12 +45,8 @@ type listClustersOutput struct {
 	Clusters []any `json:"clusters"`
 }
 
-type submitProposalOutput struct {
-	PullRequestURL string `json:"pull_request_url"`
-}
-
 // TestFullProposalLifecycle exercises the full proposal flow end to
-// end: propose, re-fetch, read at ref, list, cluster, submit. Uses a
+// end: propose, re-fetch, read at ref, list, cluster. Uses a
 // timestamp-suffixed proposal_id so the test is safely re-runnable
 // against a live deployment without a "nothing changed" or "clean
 // working tree" error from a previous run's identical commit.
@@ -158,33 +158,80 @@ func TestFullProposalLifecycle(t *testing.T) {
 		}
 	})
 
-	// submit_proposal - only if this deployment allows it. A disabled
-	// registry is a legitimate deployment shape (propose-only), not a test
-	// failure, so this is a skip, not a fail; anything else that goes
-	// wrong here is a real failure.
-	t.Run("submit_proposal", func(t *testing.T) {
-		res := callTool(t, session, "submit_proposal", map[string]any{"branch": branch})
-		if res.IsError {
-			if strings.Contains(strings.ToLower(contentText(res)), "disabled") {
-				t.Skip("submit_proposal is disabled on this deployment (registry.submitProposalEnabled=false or no GitHub auth configured)")
-			}
-			t.Fatalf("submit_proposal failed unexpectedly: %s", contentText(res))
-		}
-		var out submitProposalOutput
-		decodeStructured(t, res, &out)
-		if out.PullRequestURL == "" {
-			t.Fatal("submit_proposal returned no pull_request_url")
-		}
+}
 
-		// Best-effort reachability check - not fatal, since the PR host may
-		// be behind auth or a different network namespace from this shell.
-		resp, err := http.Get(out.PullRequestURL)
-		if err != nil {
-			t.Logf("pull request URL returned but not reachable from this shell "+
-				"(expected if it's behind auth or a different network namespace): %s (%v)", out.PullRequestURL, err)
-			return
+// maxCorroboratingAgents bounds TestAutoSubmitAtThreshold. The threshold is
+// a server-side setting no tool exposes, so the test discovers it by adding
+// agents until a pull request appears. The bound keeps a deployment with a
+// deliberately high threshold - or none configured at all - from turning
+// into an unbounded loop.
+const maxCorroboratingAgents = 5
+
+// TestAutoSubmitAtThreshold drives identical content from a series of
+// distinct agents until the registry opens a pull request on its own. This
+// is the only path to a pull request, so it is the only place this harness
+// can observe one.
+//
+// A deployment that never crosses the threshold within the bound is a
+// legitimate shape - no credential configured, or a threshold set higher
+// than this test is willing to drive - so that is a skip, not a failure.
+func TestAutoSubmitAtThreshold(t *testing.T) {
+	session := connect(t, registryAddr())
+
+	stamp := time.Now().Unix()
+	content := fmt.Sprintf(
+		"---\nname: %s\ndescription: A minimal placeholder skill seeded by "+
+			"local/gitea-init.sh, edited by local/verify's auto-submit test at %s "+
+			"to exercise the corroboration threshold.\n---\n\n## When to use this skill\n\n"+
+			"This is seed content for local dev only - edited by the verification test.\n",
+		skillName(), time.Now().UTC().Format(time.RFC3339))
+
+	var prURL string
+	for i := 1; i <= maxCorroboratingAgents && prURL == ""; i++ {
+		agentID := fmt.Sprintf("verify-corroborator-%d", i)
+		res := callTool(t, session, "propose_change", map[string]any{
+			"skill_name":     skillName(),
+			"agent_id":       agentID,
+			"proposal_id":    fmt.Sprintf("auto-submit-%d", stamp),
+			"commit_message": "verify: edit " + skillName(),
+			"files": []map[string]any{
+				{"file_path": "SKILL.md", "content": content},
+			},
+		})
+		if res.IsError {
+			t.Fatalf("propose_change as %s failed: %s", agentID, contentText(res))
 		}
-		defer resp.Body.Close()
-		t.Logf("pull request URL is reachable (%s): status %d", out.PullRequestURL, resp.StatusCode)
-	})
+		var out proposeChangeOutput
+		decodeStructured(t, res, &out)
+
+		// Every agent after the first proposes content that already exists,
+		// so it must land as corroboration rather than a branch of its own.
+		if i > 1 && !out.Deduplicated {
+			t.Fatalf("%s got its own branch for content that already existed", agentID)
+		}
+		if out.AutoSubmitted != nil {
+			if out.AutoSubmitted.PullRequestURL == "" {
+				t.Fatalf("%s: auto_submitted is set but carries no pull_request_url", agentID)
+			}
+			prURL = out.AutoSubmitted.PullRequestURL
+			t.Logf("pull request opened at corroboration %d: %s", out.Proposal.Corroboration, prURL)
+		}
+	}
+
+	if prURL == "" {
+		t.Skipf("no pull request opened within %d corroborating agents: this deployment has "+
+			"autoSubmitEndorsements set higher, set to 0, or no GitHub credential configured",
+			maxCorroboratingAgents)
+	}
+
+	// Best-effort reachability check - not fatal, since the PR host may be
+	// behind auth or a different network namespace from this shell.
+	resp, err := http.Get(prURL)
+	if err != nil {
+		t.Logf("pull request URL returned but not reachable from this shell "+
+			"(expected if it's behind auth or a different network namespace): %s (%v)", prURL, err)
+		return
+	}
+	defer resp.Body.Close()
+	t.Logf("pull request URL is reachable (%s): status %d", prURL, resp.StatusCode)
 }

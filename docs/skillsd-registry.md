@@ -1,9 +1,10 @@
 # `skillsd-registry` — the write path
 
 `skillsd-registry` is an optional, single-replica component that gives agents a
-write path onto skills — proposing changes, opening pull requests, and reporting
-how a skill actually performed — without ever handing them raw git or forge
-credentials. It owns a real git working copy and (optionally) a SQLite database,
+write path onto skills — proposing changes and reporting how a skill actually
+performed — without ever handing them raw git or forge credentials. It turns
+the proposals that enough agents independently agree on into pull requests;
+agents themselves never get to open one. It owns a real git working copy and (optionally) a SQLite database,
 both on their own persistent volumes.
 
 It's a single writer by construction, not by convention: exactly one replica
@@ -15,26 +16,32 @@ outgoing one has fully terminated.
 It serves two groups of MCP tools on one endpoint: the proposal tools and the
 evidence tools (the latter registered only when evidence collection is
 enabled — see [skillsd.md](skillsd.md) for how tool registration and the
-connect-time `instructions` work).
+connect-time `instructions` work). The two groups are halves of one loop —
+evidence says what's broken, proposals say what to do about it — joined by the
+citation chain in [From outcome to pull request](#from-outcome-to-pull-request).
 
 ## Proposal tools — proposals, clustering, and pull requests
 
 | Tool | Purpose |
 |---|---|
-| `propose_change` | Commits full new file content to a skill's proposal branch — creates it if this is the first call, appends if the agent is iterating. Deduplicates against existing proposals (below). |
+| `propose_change` | Commits full new file content to a skill's proposal branch — creates it if this is the first call, appends if the agent is iterating. Deduplicates against existing proposals (below). Takes `motivating_report_ids`, the evidence this change claims to fix. |
 | `list_proposals` | Lists proposals, filterable by skill and/or agent. |
 | `list_proposal_clusters` | Groups a skill's open proposals into clusters of competing answers to the same defect, most-contested first. |
 | `get_proposal` | Fetches one proposal by branch name: its diff against base, commit history, and endorsements. |
-| `get_skill_at_ref` | Fetches a skill's metadata as of an arbitrary ref — a branch or a commit SHA. |
-| `submit_proposal` | Pushes the branch upstream and opens a pull request for human review. Safe to retry — an existing pull request for the branch is returned rather than a second being opened. |
+| `get_skill_at_ref` | Fetches a skill's metadata as of an arbitrary ref — a branch or a commit SHA, including the one a past outcome report names. |
+
+**No tool opens a pull request.** Every tool here reads or commits; pushing a
+branch and opening a PR is a decision the registry makes on its own, when a
+proposal reaches the corroboration threshold described below. An agent's
+influence ends at the quality of the proposal it commits, which is what keeps
+a single caller from putting anything in front of a human reviewer.
 
 Branches are namespaced `proposals/<agent_id>/<skill_name>/<proposal_id>` —
 that's also the lookup key for `list_proposals`. There's no separate status
 field or database row for a proposal: its state *is* whatever's on its
-branch, and once `submit_proposal` opens a PR, the forge's own merge
-mechanism takes over. Agents send full file content rather than a patch, so
-the server computes the diff itself and callers never need a base they may
-not have in sync.
+branch, and once a PR opens, the forge's own merge mechanism takes over.
+Agents send full file content rather than a patch, so the server computes the
+diff itself and callers never need a base they may not have in sync.
 
 Deploying it requires an HTTPS clone URL with push access and a write-capable
 credential (GitHub App installation or token). See
@@ -104,11 +111,15 @@ would merge cleanly can still be rival answers. Clusters are computed per call,
 never stored.
 
 **Auto-submission at a threshold.** `autoSubmitEndorsements` is how many
-independent agents must reach identical content before a PR opens unprompted. It
-defaults to `0` (off) — deliberately, since this is the one behavior here that
-acts on its own, and it's exactly as trustworthy as `agent_id` is.
-**Authenticate callers before turning it on**; with self-asserted identity, one
-misconfigured caller can manufacture a threshold's worth of agreement by itself.
+independent agents must reach identical content before a PR opens. It defaults
+to `2`, and it is the only path to a pull request — set it to `0` and proposals
+accumulate as branches on the registry's volume, never pushed anywhere.
+
+The threshold is exactly as trustworthy as `agent_id` is. **Authenticate
+callers**; with self-asserted identity, one misconfigured caller can manufacture
+a threshold's worth of agreement by itself. Size the threshold for the callers
+you actually trust, and read it as "how many independent agents must agree
+before a human is asked to look", not as a security boundary on its own.
 
 Three agents independently hitting the same defect, `autoSubmitEndorsements: 2`:
 
@@ -149,7 +160,7 @@ false, they're simply absent from this server's `tools/list`.
 |---|---|
 | `report_outcome` | Records one session's outcome for every skill it used. Idempotent on a caller-supplied `report_id`. |
 | `list_skill_signals` | Aggregates reports into one row per `(skill, commit)`: sessions, verdict counts, defect rate. The "what should I fix next" query. |
-| `list_outcome_reports` | The individual reports behind a signal, so a proposing agent can cite report IDs. |
+| `list_outcome_reports` | The individual reports behind a signal — what actually went wrong, and the `report_id`s a proposing agent cites. |
 
 Two decisions carry most of the weight:
 
@@ -183,12 +194,57 @@ sessions that reported"; don't let a dashboard quietly drop that qualifier.
 SQLite database backing this service, see
 [data-stores.md](data-stores.md#evidence-data).
 
+## From outcome to pull request
+
+The two tool groups meet in two places: a shared key, and a citation that
+survives into the pull request.
+
+**The key is `(skill_name, skill_commit)`.** `report_outcome` requires the
+commit — the one `get_skill` returned — so an outcome attaches to a specific
+version rather than to a skill in general. That's what lets `get_skill_at_ref`
+read exactly the content a report complains about, and what lets a proposing
+agent see whether a defect rate rose between two commits. When
+`registry.evidence.verifyCommits` is on (the default), a report naming a
+skill/commit the repository doesn't contain is rejected rather than stored —
+one tree lookup per reported skill, against the same working copy the proposal
+tools use. The usual cause is a commit newer than the registry's last fetch, so
+the error says to retry with the same `report_id`.
+
+**The citation is `motivating_report_ids`.** It's carried in git, not in a side
+table, so it survives everything downstream:
+
+1. `list_outcome_reports` returns `report_id`s for the sessions that failed.
+2. The agent passes them to `propose_change` as `motivating_report_ids`.
+3. They're written onto the proposal commit as `Motivated-By:` trailers, and
+   read back off the branch whenever a proposal is loaded.
+4. When the proposal is auto-submitted, they're rendered into the PR body —
+   "Motivated by N recorded outcome report(s)" — next to the endorsing agents.
+
+So a reviewer sees both kinds of independent corroboration at once: how many
+agents converged on this content, and how many recorded sessions it claims to
+fix.
+
+**What is deliberately not connected.** No defect rate opens a pull request.
+A skill can fail in every reported session and nothing happens until agents
+converge on identical content — corroboration is the only trigger, and evidence
+only argues for the fix a human eventually reads. Citation is advisory, not
+enforced: `propose_change` accepts an empty `motivating_report_ids`, and with
+`registry.evidence.enabled` false the evidence tools are absent while the whole
+proposal path works unchanged.
+
+The client guide walks an agent through both directions of this loop, step by
+step — see
+[typical-flow.md](../internal/clientguide/skillsd-client/references/typical-flow.md)
+and [the client guide](skillsd.md#the-client-guide-get_client_guide-and-connect-time-instructions).
+
 ### A note on identity
 
 Both consolidation and evidence rest on `agent_id`, which is currently
 **self-asserted**. Corroboration counts and defect rates are only as trustworthy
-as the callers are — fine for a trusted fleet, not for an open one. Fix this
-before enabling auto-submission or treating signals as authoritative.
+as the callers are — fine for a trusted fleet, not for an open one. Since
+corroboration is what opens pull requests, authenticate callers before pointing
+this at a repo whose reviewers will trust what arrives, or treating signals as
+authoritative.
 
 ## Configuration
 

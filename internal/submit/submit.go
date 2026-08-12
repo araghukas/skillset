@@ -3,11 +3,9 @@
 // that it was opened.
 //
 // It sits between internal/proposals (which owns git) and internal/githubpr
-// (which owns the forge API) because it needs both, and because the same
-// sequence is reached two ways - an explicit submit call, and the
-// auto-submit path that fires when enough agents corroborate a proposal.
-// Neither should be able to open a second pull request for a branch that
-// already has one.
+// (which owns the forge API) because it needs both. The whole sequence is
+// driven by the registry itself, once a proposal has been corroborated by
+// enough independent agents; nothing an agent calls reaches here.
 package submit
 
 import (
@@ -36,11 +34,12 @@ func New(svc *proposals.Service, gh *githubpr.Client, baseBranch string) *Submit
 // Submit pushes p's branch and opens a pull request for it, or returns the
 // pull request it already has.
 //
-// The already-submitted check is what makes this safe to call from both the
-// explicit path and the auto-submit path without either opening a second
-// pull request for the same branch. Like every other fact about a proposal,
-// the record of submission is a ref in the repository, not a row somewhere.
-func (s *Submitter) Submit(ctx context.Context, p *proposals.Proposal, title, body string) (*proposals.Submission, error) {
+// The already-submitted check makes this idempotent: a proposal sits at or
+// above the corroboration threshold for every subsequent call that touches
+// it, so this is reached repeatedly for a branch that already has a pull
+// request. Like every other fact about a proposal, the record of submission
+// is a ref in the repository, not a row somewhere.
+func (s *Submitter) Submit(ctx context.Context, p *proposals.Proposal) (*proposals.Submission, error) {
 	if existing, ok, err := s.proposals.Submission(p.Branch); err != nil {
 		return nil, fmt.Errorf("checking for an existing pull request: %w", err)
 	} else if ok {
@@ -51,16 +50,9 @@ func (s *Submitter) Submit(ctx context.Context, p *proposals.Proposal, title, bo
 		return nil, fmt.Errorf("pushing branch: %w", err)
 	}
 
-	if title == "" {
-		title = DefaultTitle(p)
-	}
-	if body == "" {
-		body = DefaultBody(p)
-	}
-
 	pr, err := s.github.CreatePullRequest(ctx, githubpr.PullRequestInput{
-		Title: title,
-		Body:  body,
+		Title: title(p),
+		Body:  body(p),
 		Head:  p.Branch,
 		Base:  s.baseBranch,
 	})
@@ -82,16 +74,16 @@ func (s *Submitter) Submit(ctx context.Context, p *proposals.Proposal, title, bo
 	}, nil
 }
 
-// DefaultTitle is used when the caller supplies no pull request title.
-func DefaultTitle(p *proposals.Proposal) string {
+// title names the skill and the agent that opened the proposal.
+func title(p *proposals.Proposal) string {
 	return fmt.Sprintf("skillsd: propose changes to %s (%s)", p.SkillName, p.AgentID)
 }
 
-// DefaultBody writes not just what changed, but how many independent
-// agents arrived at it and which recorded failures it claims to fix. That
+// body writes not just what changed, but how many independent agents
+// arrived at it and which recorded failures it claims to fix. That
 // corroboration is the reason the pull request is worth a reviewer's time,
 // and it is invisible from the diff alone.
-func DefaultBody(p *proposals.Proposal) string {
+func body(p *proposals.Proposal) string {
 	var b strings.Builder
 
 	fmt.Fprintf(&b, "Proposed by agent `%s` via skillsd-registry.\n\n", p.AgentID)

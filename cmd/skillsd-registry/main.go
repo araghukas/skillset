@@ -53,15 +53,23 @@ func run() error {
 	}
 	slog.Info("opened skills repo",
 		"dir", cfg.RepoDir, "base_branch", cfg.SkillsRepoBaseBranch, "github_auth_mode", cfg.GitHubAuthMode)
-	if !cfg.SubmitProposalEnabled {
-		slog.Warn("submit_proposal is disabled: GitHub auth not configured or SUBMIT_PROPOSAL_ENABLED=false")
-	}
-
 	svc := proposals.New(repo, cfg.SkillsSubPath, cfg.MaxFileContentBytes)
 	gh := githubpr.New(cfg.GitHubAPIBaseURL, cfg.GitHubOwner, cfg.GitHubRepo, cfg.GitHubAuth)
 
-	if cfg.AutoSubmitEndorsements > 0 {
-		slog.Warn("auto-submission is enabled: proposals corroborated by enough agents will open pull requests unprompted",
+	// Corroboration is the only thing that opens a pull request, so both the
+	// threshold and the credential have to be in place for a proposal to
+	// ever leave this pod. Each missing half is worth saying out loud at
+	// startup: the alternative is proposals silently accumulating on a
+	// volume nobody is watching.
+	switch {
+	case cfg.AutoSubmitEndorsements <= 0:
+		slog.Warn("auto-submission is off: proposals will accumulate as local branches and are never pushed",
+			"hint", "set AUTO_SUBMIT_ENDORSEMENTS")
+	case !cfg.SubmitConfigured:
+		slog.Warn("auto-submission is configured but no pull request can be opened: GitHub credential, owner, or repo is missing",
+			"threshold", cfg.AutoSubmitEndorsements)
+	default:
+		slog.Info("auto-submission is enabled: proposals corroborated by enough agents open pull requests",
 			"threshold", cfg.AutoSubmitEndorsements)
 	}
 
@@ -102,7 +110,7 @@ func run() error {
 	proposaltools.Add(srv, proposaltools.Deps{
 		Proposals:           svc,
 		Submitter:           submitter,
-		SubmitEnabled:       cfg.SubmitProposalEnabled,
+		SubmitConfigured:    cfg.SubmitConfigured,
 		AutoSubmitThreshold: cfg.AutoSubmitEndorsements,
 		DefaultMaxBytes:     cfg.MaxResultBytes,
 		ClientGuideAppendix: guideAppendix,
@@ -124,19 +132,19 @@ func run() error {
 // repoConfigSection builds the "Repository configuration" section appended
 // to the client guide, naming the two repos/branches a proposal passes
 // through - the repo skills are read from and forked from, and the repo
-// submit_proposal actually opens pull requests against. The two are usually
-// the same repo, but nothing enforces that (GitHubOwner/GitHubRepo can name
-// a different repo than SkillsRepoURL points to), so both are spelled out
+// corroborated proposals open pull requests against. The two are usually the
+// same repo, but nothing enforces that (GitHubOwner/GitHubRepo can name a
+// different repo than SkillsRepoURL points to), so both are spelled out
 // rather than assumed identical.
 func repoConfigSection(cfg registryconfig.Config) string {
-	prRepo := "not configured - submit_proposal is disabled"
+	prRepo := "not configured - no pull requests are opened"
 	if cfg.GitHubOwner != "" && cfg.GitHubRepo != "" {
 		prRepo = fmt.Sprintf("https://github.com/%s/%s", cfg.GitHubOwner, cfg.GitHubRepo)
 	}
 	return fmt.Sprintf(
 		"## Repository configuration\n\n"+
 			"- Skills are read from, and proposals are forked from, %s on branch %q.\n"+
-			"- submit_proposal opens pull requests against %s, targeting branch %q.\n",
+			"- Corroborated proposals open pull requests against %s, targeting branch %q.\n",
 		cfg.SkillsRepoURL, cfg.SkillsRepoBaseBranch,
 		prRepo, cfg.SkillsRepoBaseBranch,
 	)

@@ -79,8 +79,6 @@ spec:
               value: {{ .Values.registry.github.repo | quote }}
             - name: GITHUB_API_BASE_URL
               value: {{ .Values.registry.github.apiBaseURL | quote }}
-            - name: SUBMIT_PROPOSAL_ENABLED
-              value: {{ .Values.registry.submitProposalEnabled | quote }}
             - name: AUTO_SUBMIT_ENDORSEMENTS
               value: {{ .Values.registry.autoSubmitEndorsements | quote }}
             - name: FETCH_INTERVAL
@@ -110,7 +108,7 @@ spec:
             - name: LOG_LEVEL
               value: {{ .Values.logLevel | quote }}
             # With no credential configured, skillsd-registry starts with
-            # SubmitProposal disabled and everything else working.
+            # everything working except opening pull requests.
             {{- include "skillsd.githubAuthEnv" $auth | nindent 12 }}
           volumeMounts:
             - name: repo-data

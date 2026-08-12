@@ -19,7 +19,7 @@ flowchart LR
 
   GH -- "git clone --depth 1\n(init container, once)" --> SV1
   GH -- "fetch base branch\n(periodic)" --> RV
-  RV -- "push proposal branch\n(on submit)" --> GH
+  RV -- "push proposal branch\n(at corroboration threshold)" --> GH
   Agents(["AI agents"]) -- "report_outcome" --> EV
   EV -. "VACUUM INTO\n(periodic snapshot)" .-> Backup[("backup target\n(operator-provided)")]
 ```
@@ -51,11 +51,13 @@ repository: the base branch (re-fetched from origin every `fetchInterval`,
 default 5 minutes) plus every open proposal branch it has committed to locally.
 
 **Caveat:** most of this volume is a cache — the base branch is trivially
-re-cloned. But a proposal branch is only pushed upstream when
-`submit_proposal` is called; until then, it exists **only** in this volume. Deleting `repo-data`
-before an agent submits its proposal loses that proposal, not just a cache of
-it. In practice this is rarely worth backing up on its own merits (an agent can
-always re-propose), but it's not *purely* a cache the way `skills-data` is.
+re-cloned. But a proposal branch is pushed upstream only once it crosses
+`autoSubmitEndorsements`; below the threshold it exists **only** in this
+volume, and a proposal no other agent ever corroborates stays here forever.
+Deleting `repo-data` loses those proposals, not just a cache of them. In
+practice this is rarely worth backing up on its own merits (an agent can always
+re-propose), but it's not *purely* a cache the way `skills-data` is — and the
+lower the threshold, the less of this volume is at risk.
 
 Because exactly one replica ever writes here, the Deployment uses the `Recreate`
 strategy — the old pod fully terminates (and unmounts) before the new one
