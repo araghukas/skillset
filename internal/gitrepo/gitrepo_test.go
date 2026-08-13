@@ -101,7 +101,7 @@ func TestCommitOnBranchCreatesNewBranch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	hash, err := repo.CommitOnBranch("proposals/agent-1/foo/fix-typo", base,
+	hash, err := repo.CommitOnBranch("suggestions/agent-1/foo/fix-typo", base,
 		[]FileChange{{Path: "skills/foo/SKILL.md", Content: []byte("hello, fixed")}},
 		"fix typo", testSignature())
 	if err != nil {
@@ -136,7 +136,7 @@ func TestCommitOnBranchAppendsToExistingBranch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	branchName := "proposals/agent-1/foo/iterate"
+	branchName := "suggestions/agent-1/foo/iterate"
 	first, err := repo.CommitOnBranch(branchName, base,
 		[]FileChange{{Path: "skills/foo/SKILL.md", Content: []byte("v1")}}, "first", testSignature())
 	if err != nil {
@@ -171,21 +171,21 @@ func TestMergeBaseFindsOriginalForkPoint(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	proposalHead, err := repo.CommitOnBranch("proposals/agent-1/foo/fix", base,
-		[]FileChange{{Path: "skills/foo/SKILL.md", Content: []byte("v1")}}, "propose", testSignature())
+	suggestionHead, err := repo.CommitOnBranch("suggestions/agent-1/foo/fix", base,
+		[]FileChange{{Path: "skills/foo/SKILL.md", Content: []byte("v1")}}, "suggest", testSignature())
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Advance the base branch further, simulating upstream progress after
-	// the proposal already forked from it.
+	// the suggestion already forked from it.
 	newBaseHead, err := repo.CommitOnBranch(branch, base,
 		[]FileChange{{Path: "skills/foo/SKILL.md", Content: []byte("unrelated update")}}, "advance base", testSignature())
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	mb, err := repo.MergeBase(newBaseHead, proposalHead)
+	mb, err := repo.MergeBase(newBaseHead, suggestionHead)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +205,7 @@ func TestDiff(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	hash, err := repo.CommitOnBranch("proposals/agent-1/foo/fix-typo", base,
+	hash, err := repo.CommitOnBranch("suggestions/agent-1/foo/fix-typo", base,
 		[]FileChange{{Path: "skills/foo/SKILL.md", Content: []byte("hello, fixed")}}, "fix typo", testSignature())
 	if err != nil {
 		t.Fatal(err)
@@ -231,7 +231,7 @@ func TestPush(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	branchName := "proposals/agent-1/foo/fix-typo"
+	branchName := "suggestions/agent-1/foo/fix-typo"
 	if _, err := repo.CommitOnBranch(branchName, base,
 		[]FileChange{{Path: "skills/foo/SKILL.md", Content: []byte("hello, fixed")}}, "fix typo", testSignature()); err != nil {
 		t.Fatal(err)
@@ -261,19 +261,19 @@ func TestBranchesWithPrefix(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, name := range []string{"proposals/agent-1/foo/a", "proposals/agent-2/foo/b"} {
+	for _, name := range []string{"suggestions/agent-1/foo/a", "suggestions/agent-2/foo/b"} {
 		if _, err := repo.CommitOnBranch(name, base,
 			[]FileChange{{Path: "skills/foo/SKILL.md", Content: []byte(name)}}, "msg", testSignature()); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	names, err := repo.BranchesWithPrefix("proposals/")
+	names, err := repo.BranchesWithPrefix("suggestions/")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(names) != 2 {
-		t.Fatalf("expected 2 proposal branches, got %d: %v", len(names), names)
+		t.Fatalf("expected 2 suggestion branches, got %d: %v", len(names), names)
 	}
 }
 

@@ -2,7 +2,7 @@
 // agentskills.io skill and its supporting context files.
 //
 // These are the types the whole service passes around - internal/skillparse
-// builds them, internal/registry indexes them, internal/proposals reads them
+// builds them, internal/registry indexes them, internal/suggestions reads them
 // out of git, and the MCP tool layer serves them. They live in their own
 // package so none of those has to import another just to name a skill.
 package skill

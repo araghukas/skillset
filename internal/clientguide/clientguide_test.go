@@ -85,7 +85,7 @@ func TestGuideTextIncludesEveryReferenceFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, tool := range []string{"list_skills", "get_skill", "propose_change", "report_outcome", "get_proposal"} {
+	for _, tool := range []string{"list_skills", "get_skill", "record_suggestion", "report_outcome", "get_suggestion"} {
 		if !strings.Contains(got, tool) {
 			t.Errorf("full guide does not mention %q", tool)
 		}
@@ -102,8 +102,8 @@ func TestGuideAdvertisesNoSubmitTool(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, text := range []string{Instructions(""), full} {
-		if strings.Contains(text, "submit_proposal") {
-			t.Error("guide advertises a submit_proposal tool, which no server registers")
+		if strings.Contains(text, "submit_suggestion") {
+			t.Error("guide advertises a submit_suggestion tool, which no server registers")
 		}
 	}
 }
@@ -123,7 +123,7 @@ func TestInstructionsAppendsAppendix(t *testing.T) {
 	}
 
 	section := "## Repository configuration\n\n" +
-		"- Skills are read from, and proposals are forked from, https://github.com/acme/skills.git on branch \"main\".\n"
+		"- Skills are read from, and suggestions are forked from, https://github.com/acme/skills.git on branch \"main\".\n"
 	if got := Instructions(section); !strings.Contains(got, "https://github.com/acme/skills.git") {
 		t.Errorf("expected repo URL in instructions, got: %q", got)
 	}

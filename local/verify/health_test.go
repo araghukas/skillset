@@ -63,10 +63,8 @@ func TestInitializeInstructionsNonEmpty(t *testing.T) {
 	}
 }
 
-// TestToolsListNamesExpectedTools replaces the old reflection checks that
-// each RPC service was registered ("skills.v1.ProposalService",
-// "skills.v1.EvidenceService" show up in `grpcurl list`). tools/list is
-// the direct MCP analogue: the set of tools a client actually sees.
+// TestToolsListNamesExpectedTools confirms tools/list names the set of
+// tools a client actually sees on each server.
 func TestToolsListNamesExpectedTools(t *testing.T) {
 	t.Run("skillsd", func(t *testing.T) {
 		session := connect(t, skillsdAddr())
@@ -82,8 +80,8 @@ func TestToolsListNamesExpectedTools(t *testing.T) {
 		session := connect(t, registryAddr())
 		got := toolNames(t, session)
 		for _, want := range []string{
-			"propose_change", "list_proposals", "get_proposal",
-			"list_proposal_clusters", "get_skill_at_ref",
+			"record_suggestion", "list_suggestions", "get_suggestion",
+			"list_suggestion_clusters", "get_skill_at_ref",
 			"get_client_guide",
 		} {
 			if !got[want] {

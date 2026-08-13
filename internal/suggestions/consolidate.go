@@ -1,4 +1,4 @@
-package proposals
+package suggestions
 
 import (
 	"context"
@@ -17,7 +17,7 @@ import (
 
 const (
 	// endorsementRefPrefix and submissionRefPrefix namespace the annotations
-	// that hang off a proposal branch. Both sit outside refs/heads and
+	// that hang off a suggestion branch. Both sit outside refs/heads and
 	// refs/tags so nothing mistakes them for a branch or a release tag, and
 	// both are pushed alongside the branch on submission.
 	endorsementRefPrefix = "refs/endorsements/"
@@ -52,14 +52,14 @@ func (s *Service) skillFilesAt(ctx context.Context, skillName string, hash plumb
 	dirPrefix := path.Join(s.subPath, skillName)
 	keys, err := backend.List(ctx, dirPrefix)
 	if err != nil {
-		return nil, fmt.Errorf("proposals: listing %s: %w", dirPrefix, err)
+		return nil, fmt.Errorf("suggestions: listing %s: %w", dirPrefix, err)
 	}
 
 	out := make(map[string][]byte, len(keys))
 	for _, key := range keys {
 		obj, err := backend.Get(ctx, key)
 		if err != nil {
-			return nil, fmt.Errorf("proposals: reading %s: %w", key, err)
+			return nil, fmt.Errorf("suggestions: reading %s: %w", key, err)
 		}
 		out[key] = obj.Content
 	}
@@ -86,8 +86,9 @@ func hashFiles(files map[string][]byte) string {
 
 // normalizeContent canonicalizes a file for hashing: CRLF to LF, no trailing
 // whitespace on any line, no blank lines at EOF, exactly one final newline.
-// These are differences no reviewer would consider a different proposal, so
-// letting them split a cluster would just mean more PRs saying the same thing.
+// These are differences no reviewer would consider a different suggestion,
+// so letting them split a cluster would just mean more PRs saying the same
+// thing.
 func normalizeContent(b []byte) []byte {
 	text := strings.ReplaceAll(string(b), "\r\n", "\n")
 
@@ -105,9 +106,10 @@ func normalizeContent(b []byte) []byte {
 }
 
 // applyChanges returns what files would look like with the given changes
-// applied, without writing anything. ProposeChange uses it to learn a
-// prospective content hash *before* committing, so a duplicate proposal can
-// be turned into an endorsement without ever creating a branch to abandon.
+// applied, without writing anything. RecordSuggestion uses it to learn a
+// prospective content hash *before* committing, so a duplicate suggestion
+// can be turned into an endorsement without ever creating a branch to
+// abandon.
 func applyChanges(files map[string][]byte, subPath, skillName string, changes []FileEdit) map[string][]byte {
 	out := make(map[string][]byte, len(files))
 	maps.Copy(out, files)
@@ -127,16 +129,16 @@ func applyChanges(files map[string][]byte, subPath, skillName string, changes []
 // Endorsements
 // ==========================================
 
-// endorsementRef is where a single agent's endorsement of a proposal lives.
-// The branch's own agent/skill/id triple is reused as the path so the ref
-// tree mirrors the branch tree and a prefix scan finds every endorsement of
-// one proposal.
+// endorsementRef is where a single agent's endorsement of a suggestion
+// lives. The branch's own agent/skill/id triple is reused as the path so
+// the ref tree mirrors the branch tree and a prefix scan finds every
+// endorsement of one suggestion.
 func endorsementRef(branch, endorserID string) string {
-	return endorsementRefPrefix + strings.TrimPrefix(branch, "proposals/") + "/" + endorserID
+	return endorsementRefPrefix + strings.TrimPrefix(branch, "suggestions/") + "/" + endorserID
 }
 
 func endorsementRefPrefixFor(branch string) string {
-	return endorsementRefPrefix + strings.TrimPrefix(branch, "proposals/") + "/"
+	return endorsementRefPrefix + strings.TrimPrefix(branch, "suggestions/") + "/"
 }
 
 // Endorse records that endorserID independently produced the content already
@@ -146,12 +148,12 @@ func (s *Service) Endorse(branch, endorserID string, head plumbing.Hash) error {
 	return s.repo.Annotate(endorsementRef(branch, endorserID), endorserID, msg, head)
 }
 
-// endorsementsFor reads a proposal's endorsements and its corroboration
-// count: the proposing agent, plus every endorser still pointing at the
+// endorsementsFor reads a suggestion's endorsements and its corroboration
+// count: the suggesting agent, plus every endorser still pointing at the
 // current head.
 //
 // An endorsement targets the exact commit it was made against. When the
-// proposal moves on, earlier endorsements are kept but marked stale and
+// suggestion moves on, earlier endorsements are kept but marked stale and
 // excluded from the count - an agent corroborated the content it actually
 // arrived at, and carrying that forward onto a later revision it never saw
 // would manufacture agreement that never happened.
@@ -161,7 +163,7 @@ func (s *Service) endorsementsFor(branch string, head plumbing.Hash) ([]Endorsem
 		return nil, 0, err
 	}
 
-	corroboration := 1 // the proposing agent
+	corroboration := 1 // the suggesting agent
 	out := make([]Endorsement, 0, len(annotations))
 	for _, a := range annotations {
 		stale := a.Target != head.String()
@@ -178,19 +180,19 @@ func (s *Service) endorsementsFor(branch string, head plumbing.Hash) ([]Endorsem
 	return out, corroboration, nil
 }
 
-// findDuplicate looks for an open proposal for skillName, by an agent other
-// than agentID, whose content hash already equals hash.
-func (s *Service) findDuplicate(ctx context.Context, skillName, agentID, hash string) (*Proposal, error) {
-	existing, err := s.ListProposals(ctx, skillName, "")
+// findDuplicate looks for an open suggestion for skillName, by an agent
+// other than agentID, whose content hash already equals hash.
+func (s *Service) findDuplicate(ctx context.Context, skillName, agentID, hash string) (*Suggestion, error) {
+	existing, err := s.ListSuggestions(ctx, skillName, "")
 	if err != nil {
 		return nil, err
 	}
-	for _, p := range existing {
-		if p.AgentID == agentID {
+	for _, sg := range existing {
+		if sg.AgentID == agentID {
 			continue
 		}
-		if p.ContentHash == hash {
-			return p, nil
+		if sg.ContentHash == hash {
+			return sg, nil
 		}
 	}
 	return nil, nil
@@ -201,13 +203,13 @@ func (s *Service) findDuplicate(ctx context.Context, skillName, agentID, hash st
 // ==========================================
 
 func submissionRef(branch string) string {
-	return submissionRefPrefix + strings.TrimPrefix(branch, "proposals/")
+	return submissionRefPrefix + strings.TrimPrefix(branch, "suggestions/")
 }
 
 // MarkSubmitted records that a pull request has been opened for branch.
-// Like everything else about a proposal, this lives in git rather than a
-// database - it's what stops the auto-submit threshold from opening a second
-// pull request for a proposal that already has one.
+// Like everything else about a suggestion, this lives in git rather than a
+// database - it's what stops the auto-submit threshold from opening a
+// second pull request for a suggestion that already has one.
 func (s *Service) MarkSubmitted(branch string, head plumbing.Hash, prURL string, prNumber int64) error {
 	msg := fmt.Sprintf("%s\n%d\n", prURL, prNumber)
 	return s.repo.Annotate(submissionRef(branch), "skillsd-registry", msg, head)
@@ -254,34 +256,34 @@ func (s *Service) PushRefs(branch string) ([]string, error) {
 // Clustering
 // ==========================================
 
-// ListClusters groups a skill's open proposals by whether they edit
+// ListClusters groups a skill's open suggestions by whether they edit
 // overlapping regions of the same files, and returns them most-corroborated
 // first.
 //
 // Everything here is recomputed from branch state on each call; no cluster
 // is ever stored. The output is a measurement of where independent agents
-// converged, and deliberately not an opinion about which proposal is right -
-// that judgment belongs to whoever reviews the pull request.
+// converged, and deliberately not an opinion about which suggestion is
+// right - that judgment belongs to whoever reviews the pull request.
 func (s *Service) ListClusters(ctx context.Context, skillFilter string, includeSingletons bool) ([]*Cluster, error) {
-	all, err := s.ListProposals(ctx, skillFilter, "")
+	all, err := s.ListSuggestions(ctx, skillFilter, "")
 	if err != nil {
 		return nil, err
 	}
 
-	bySkill := make(map[string][]*Proposal)
-	for _, p := range all {
-		bySkill[p.SkillName] = append(bySkill[p.SkillName], p)
+	bySkill := make(map[string][]*Suggestion)
+	for _, sg := range all {
+		bySkill[sg.SkillName] = append(bySkill[sg.SkillName], sg)
 	}
 
 	var out []*Cluster
 	for _, group := range bySkill {
 		ranges := make([]map[string][]gitrepo.LineRange, len(group))
-		for i, p := range group {
-			base := plumbing.NewHash(p.BaseSHA)
-			head := plumbing.NewHash(p.HeadSHA)
+		for i, sg := range group {
+			base := plumbing.NewHash(sg.BaseSHA)
+			head := plumbing.NewHash(sg.HeadSHA)
 			r, err := s.repo.ChangedRanges(base, head)
 			if err != nil {
-				return nil, fmt.Errorf("proposals: computing changed ranges for %q: %w", p.Branch, err)
+				return nil, fmt.Errorf("suggestions: computing changed ranges for %q: %w", sg.Branch, err)
 			}
 			ranges[i] = r
 		}
@@ -295,7 +297,7 @@ func (s *Service) ListClusters(ctx context.Context, skillFilter string, includeS
 			pathCounts := make(map[string]int)
 
 			for _, i := range members {
-				cluster.Proposals = append(cluster.Proposals, group[i])
+				cluster.Suggestions = append(cluster.Suggestions, group[i])
 				agents[group[i].AgentID] = struct{}{}
 				for _, e := range group[i].Endorsements {
 					if !e.Stale {
@@ -322,12 +324,12 @@ func (s *Service) ListClusters(ctx context.Context, skillFilter string, includeS
 		if out[i].DistinctAgents != out[j].DistinctAgents {
 			return out[i].DistinctAgents > out[j].DistinctAgents
 		}
-		return out[i].Proposals[0].Branch < out[j].Proposals[0].Branch
+		return out[i].Suggestions[0].Branch < out[j].Suggestions[0].Branch
 	})
 	return out, nil
 }
 
-// connectedComponents unions proposals whose changed ranges overlap and
+// connectedComponents unions suggestions whose changed ranges overlap and
 // returns the resulting index groups.
 func connectedComponents(ranges []map[string][]gitrepo.LineRange) [][]int {
 	parent := make([]int, len(ranges))
@@ -368,8 +370,8 @@ func connectedComponents(ranges []map[string][]gitrepo.LineRange) [][]int {
 	return out
 }
 
-// overlaps reports whether two proposals touch a common region of a common
-// file.
+// overlaps reports whether two suggestions touch a common region of a
+// common file.
 func overlaps(a, b map[string][]gitrepo.LineRange) bool {
 	for filePath, aRanges := range a {
 		bRanges, ok := b[filePath]

@@ -263,7 +263,7 @@ func TestRollupIsCumulativeAcrossRuns(t *testing.T) {
 	}
 }
 
-func TestListReportsFiltersToWhatAProposerNeeds(t *testing.T) {
+func TestListReportsFiltersToWhatASuggesterNeeds(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 

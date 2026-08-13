@@ -1,11 +1,12 @@
-// Package submit turns a proposal into a pull request: pushing its branch
+// Package submit turns a suggestion into a pull request: pushing its branch
 // and endorsement refs upstream, opening the pull request, and recording
 // that it was opened.
 //
-// It sits between internal/proposals (which owns git) and internal/githubpr
-// (which owns the forge API) because it needs both. The whole sequence is
-// driven by the registry itself, once a proposal has been corroborated by
-// enough independent agents; nothing an agent calls reaches here.
+// It sits between internal/suggestions (which owns git) and
+// internal/githubpr (which owns the forge API) because it needs both. The
+// whole sequence is driven by the registry itself, once a suggestion has
+// been corroborated by enough independent agents; nothing an agent calls
+// reaches here.
 package submit
 
 import (
@@ -15,83 +16,83 @@ import (
 	"strings"
 
 	"github.com/araghukas/skillset/internal/githubpr"
-	"github.com/araghukas/skillset/internal/proposals"
+	"github.com/araghukas/skillset/internal/suggestions"
 	"github.com/go-git/go-git/v5/plumbing"
 )
 
-// Submitter opens pull requests for proposals.
+// Submitter opens pull requests for suggestions.
 type Submitter struct {
-	proposals  *proposals.Service
-	github     *githubpr.Client
-	baseBranch string
+	suggestions *suggestions.Service
+	github      *githubpr.Client
+	baseBranch  string
 }
 
 // New returns a Submitter that opens pull requests against baseBranch.
-func New(svc *proposals.Service, gh *githubpr.Client, baseBranch string) *Submitter {
-	return &Submitter{proposals: svc, github: gh, baseBranch: baseBranch}
+func New(svc *suggestions.Service, gh *githubpr.Client, baseBranch string) *Submitter {
+	return &Submitter{suggestions: svc, github: gh, baseBranch: baseBranch}
 }
 
-// Submit pushes p's branch and opens a pull request for it, or returns the
+// Submit pushes sg's branch and opens a pull request for it, or returns the
 // pull request it already has.
 //
-// The already-submitted check makes this idempotent: a proposal sits at or
-// above the corroboration threshold for every subsequent call that touches
-// it, so this is reached repeatedly for a branch that already has a pull
-// request. Like every other fact about a proposal, the record of submission
-// is a ref in the repository, not a row somewhere.
-func (s *Submitter) Submit(ctx context.Context, p *proposals.Proposal) (*proposals.Submission, error) {
-	if existing, ok, err := s.proposals.Submission(p.Branch); err != nil {
+// The already-submitted check makes this idempotent: a suggestion sits at
+// or above the corroboration threshold for every subsequent call that
+// touches it, so this is reached repeatedly for a branch that already has a
+// pull request. Like every other fact about a suggestion, the record of
+// submission is a ref in the repository, not a row somewhere.
+func (s *Submitter) Submit(ctx context.Context, sg *suggestions.Suggestion) (*suggestions.Submission, error) {
+	if existing, ok, err := s.suggestions.Submission(sg.Branch); err != nil {
 		return nil, fmt.Errorf("checking for an existing pull request: %w", err)
 	} else if ok {
 		return existing, nil
 	}
 
-	if err := s.proposals.Push(ctx, p.Branch); err != nil {
+	if err := s.suggestions.Push(ctx, sg.Branch); err != nil {
 		return nil, fmt.Errorf("pushing branch: %w", err)
 	}
 
 	pr, err := s.github.CreatePullRequest(ctx, githubpr.PullRequestInput{
-		Title: title(p),
-		Body:  body(p),
-		Head:  p.Branch,
+		Title: title(sg),
+		Body:  body(sg),
+		Head:  sg.Branch,
 		Base:  s.baseBranch,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("opening pull request: %w", err)
 	}
 
-	if err := s.proposals.MarkSubmitted(p.Branch, plumbing.NewHash(p.HeadSHA), pr.URL, pr.Number); err != nil {
+	if err := s.suggestions.MarkSubmitted(sg.Branch, plumbing.NewHash(sg.HeadSHA), pr.URL, pr.Number); err != nil {
 		// The pull request exists; failing the call now would tell the
 		// caller nothing happened when something did. Log instead - the
 		// cost of a lost marker is a duplicate-PR attempt later, which
 		// GitHub itself rejects.
-		slog.Error("could not record submission marker", "branch", p.Branch, "error", err)
+		slog.Error("could not record submission marker", "branch", sg.Branch, "error", err)
 	}
 
-	return &proposals.Submission{
+	return &suggestions.Submission{
 		PullRequestURL:    pr.URL,
 		PullRequestNumber: pr.Number,
 	}, nil
 }
 
-// title names the skill and the agent that opened the proposal.
-func title(p *proposals.Proposal) string {
-	return fmt.Sprintf("skillsd: propose changes to %s (%s)", p.SkillName, p.AgentID)
+// title names the skill and the agent that opened the suggestion.
+func title(sg *suggestions.Suggestion) string {
+	return fmt.Sprintf("skillsd: suggested changes to %s (%s)", sg.SkillName, sg.AgentID)
 }
 
 // body writes not just what changed, but how many independent agents
 // arrived at it and which recorded failures it claims to fix. That
 // corroboration is the reason the pull request is worth a reviewer's time,
 // and it is invisible from the diff alone.
-func body(p *proposals.Proposal) string {
+func body(sg *suggestions.Suggestion) string {
 	var b strings.Builder
 
-	fmt.Fprintf(&b, "Proposed by agent `%s` via skillsd-registry.\n\n", p.AgentID)
+	fmt.Fprintf(&b, "Suggested by agent `%s` via skillsd-registry.\n\n", sg.AgentID)
 
-	if n := p.Corroboration; n > 1 {
-		fmt.Fprintf(&b, "**Independently proposed by %d agents.** Each arrived at identical "+
-			"content without seeing the others' work:\n\n- `%s` (opened this proposal)\n", n, p.AgentID)
-		for _, e := range p.Endorsements {
+	if n := sg.Corroboration; n > 1 {
+		fmt.Fprintf(&b, "**Independently suggested by %d agents.** Each arrived at identical "+
+			"content without seeing the others' work:\n\n- `%s` (recorded this suggestion)\n", n, sg.AgentID)
+		for _, e := range sg.Endorsements {
 			if !e.Stale {
 				fmt.Fprintf(&b, "- `%s`\n", e.AgentID)
 			}
@@ -99,13 +100,13 @@ func body(p *proposals.Proposal) string {
 		b.WriteString("\n")
 	}
 
-	if ids := p.MotivatingReportIDs; len(ids) > 0 {
+	if ids := sg.MotivatingReportIDs; len(ids) > 0 {
 		fmt.Fprintf(&b, "Motivated by %d recorded outcome report(s): %s\n\n",
 			len(ids), "`"+strings.Join(ids, "`, `")+"`")
 	}
 
 	b.WriteString("Commits:\n")
-	for _, c := range p.Commits {
+	for _, c := range sg.Commits {
 		sha := c.SHA
 		if len(sha) > 7 {
 			sha = sha[:7]
@@ -113,8 +114,8 @@ func body(p *proposals.Proposal) string {
 		fmt.Fprintf(&b, "- %s: %s\n", sha, firstLine(c.Message))
 	}
 
-	if p.SourceThreadURI != "" {
-		fmt.Fprintf(&b, "\nSource conversation: %s\n", p.SourceThreadURI)
+	if sg.SourceThreadURI != "" {
+		fmt.Fprintf(&b, "\nSource conversation: %s\n", sg.SourceThreadURI)
 	}
 	return b.String()
 }

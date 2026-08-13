@@ -1,6 +1,6 @@
 # Purpose
 
-Skillset serves an evolving set of [agentskills](https://agentskills.io) to a fleet of agents. It collects proposals for updates and improvements, and [consolidates endorsements](docs/skillsd-registry.md#consolidation-how-n-agents-produce-one-pull-request) into manageable pull requests for final review. It is an API for agents, not humans, written in Go and served over [MCP](https://modelcontextprotocol.io). Curious humans should see [docs/quickstart.md](docs/quickstart.md).
+Skillset serves an evolving set of [agentskills](https://agentskills.io) to a fleet of agents. It collects suggestions for updates and improvements, and [consolidates endorsements](docs/skillsd-registry.md#consolidation-how-n-agents-produce-one-pull-request) into manageable pull requests for final review. It is an API for agents, not humans, written in Go and served over [MCP](https://modelcontextprotocol.io). Curious humans should see [docs/quickstart.md](docs/quickstart.md).
 
 ## Why this exists
 
@@ -9,11 +9,11 @@ While `git` tracks changes, `skillset` tracks *outcomes* and enables skills to e
 Skills are how a fleet of AI agents remembers what it's learned. `skillset`
 is the layer that turns that memory into something that actually improves:
 it serves the current skill set to every agent, collects independent
-proposals when agents find something wrong, and collapses agreement into
+suggestions when agents find something wrong, and collapses agreement into
 pull requests instead of noise.
 
 Git remains the durable store underneath, while human reviewers stay in charge of
-merging any proposal into that permanent record.
+merging any suggestion into that permanent record.
 
 `skillset` does what git alone cannot:
 
@@ -37,7 +37,7 @@ merging any proposal into that permanent record.
 | Workload | Role | Scale | Does |
 |---|---|---|---|
 | `skillsd` | Read path | N replicas, stateless | Serves the current skill set over MCP, every skill attributed to the commit it came from |
-| `skillsd-registry` | Write path (optional) | 1 replica, stateful | Turns agent proposals into git commits, deduplicates and clusters competing fixes, opens pull requests on the git forge for human review |
+| `skillsd-registry` | Write path (optional) | 1 replica, stateful | Turns agent suggestions into git commits, deduplicates and clusters competing fixes, opens pull requests on the git forge for human review |
 
 ## Architecture
 
@@ -47,13 +47,13 @@ flowchart TB
 
   subgraph K8s["Kubernetes cluster"]
     Read["skillsd\nread fleet, N replicas\nMCP: list_skills, get_skill, get_client_guide"]
-    Write["skillsd-registry\nwrite path, 1 replica\nMCP: propose_change, report_outcome, …"]
+    Write["skillsd-registry\nwrite path, 1 replica\nMCP: record_suggestion, report_outcome, …"]
   end
 
   Forge[("Git forge\nGitHub, Gitea, …\nskills repo · pull requests")]
 
   Agent -- "discover, read" --> Read
-  Agent -- "propose" --> Write
+  Agent -- "suggest" --> Write
   Agent -- "report, query signals" --> Write
 
   Forge -- "clone, read-only" --> Read
@@ -72,7 +72,7 @@ volume.
 |---|---|
 | [docs/quickstart.md](docs/quickstart.md) | Deploying to Kubernetes and pointing an agent at the running service |
 | [docs/skillsd.md](docs/skillsd.md) | The read fleet, how it loads and serves skills |
-| [docs/skillsd-registry.md](docs/skillsd-registry.md) | Proposals, consolidation, pull requests, and outcome reporting |
+| [docs/skillsd-registry.md](docs/skillsd-registry.md) | Suggestions, consolidation, pull requests, and outcome reporting |
 | [docs/data-stores.md](docs/data-stores.md) | What's persisted, where, and what's actually irreplaceable |
 | [docs/helm-chart.md](docs/helm-chart.md) | Chart structure, full values reference, GitHub auth, installation |
 
@@ -92,7 +92,7 @@ make dev
 
 The default requires no GitHub account: `make dev` bootstraps a throwaway
 Gitea instance in the cluster (via `gitea-up`) and points both components at
-it, so the full read + propose + auto-submitted-PR path works offline.
+it, so the full read + suggest + auto-submitted-PR path works offline.
 
 To run against a *real* GitHub repo instead (not a Gitea clone of one), use
 whichever auth you can. Both modes skip the Gitea bootstrap, since `gitea-up`

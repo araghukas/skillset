@@ -1,11 +1,12 @@
 # `skillsd-registry` — the write path
 
 `skillsd-registry` is an optional, single-replica component that gives agents a
-write path onto skills — proposing changes and reporting how a skill actually
-performed — without ever handing them raw git or forge credentials. It turns
-the proposals that enough agents independently agree on into pull requests;
-agents themselves never get to open one. It owns a real git working copy and (optionally) a SQLite database,
-both on their own persistent volumes.
+write path onto skills — recording suggested changes and reporting how a
+skill actually performed — without ever handing them raw git or forge
+credentials. It turns the suggestions that enough agents independently agree
+on into pull requests; agents themselves never get to open one. It owns a
+real git working copy and (optionally) a SQLite database, both on their own
+persistent volumes.
 
 It's a single writer by construction, not by convention: exactly one replica
 ever mounts the repo volume, git operations serialize on an in-process mutex,
@@ -13,35 +14,39 @@ and the Deployment uses `Recreate` (not `RollingUpdate`) so a second pod can
 never start — and try to mount the same `ReadWriteOnce` volume — before the
 outgoing one has fully terminated.
 
-It serves two groups of MCP tools on one endpoint: the proposal tools and the
-evidence tools (the latter registered only when evidence collection is
+It serves two groups of MCP tools on one endpoint: the suggestion tools and
+the evidence tools (the latter registered only when evidence collection is
 enabled — see [skillsd.md](skillsd.md) for how tool registration and the
 connect-time `instructions` work). The two groups are halves of one loop —
-evidence says what's broken, proposals say what to do about it — joined by the
-citation chain in [From outcome to pull request](#from-outcome-to-pull-request).
+evidence says what's broken, suggestions say what to do about it — joined by
+the citation chain in [From outcome to pull request](#from-outcome-to-pull-request).
 
-## Proposal tools — proposals, clustering, and pull requests
+## Suggestion tools — suggestions, clustering, and pull requests
 
 | Tool | Purpose |
 |---|---|
-| `propose_change` | Commits full new file content to a skill's proposal branch — creates it if this is the first call, appends if the agent is iterating. Deduplicates against existing proposals (below). Takes `motivating_report_ids`, the evidence this change claims to fix. |
-| `list_proposals` | Lists proposals, filterable by skill and/or agent. |
-| `list_proposal_clusters` | Groups a skill's open proposals into clusters of competing answers to the same defect, most-contested first. |
-| `get_proposal` | Fetches one proposal by branch name: its diff against base, commit history, and endorsements. |
+| `record_suggestion` | Commits full new file content to a skill's suggestion branch — creates it if this is the first call, appends if the agent is iterating. Deduplicates against existing suggestions (below). Takes `motivating_report_ids`, the evidence this change claims to fix. |
+| `list_suggestions` | Lists suggestions, filterable by skill and/or agent. |
+| `list_suggestion_clusters` | Groups a skill's open suggestions into clusters of competing answers to the same defect, most-contested first. |
+| `get_suggestion` | Fetches one suggestion by branch name: its diff against base, commit history, and endorsements. |
 | `get_skill_at_ref` | Fetches a skill's metadata as of an arbitrary ref — a branch or a commit SHA, including the one a past outcome report names. |
 
 **No tool opens a pull request.** Every tool here reads or commits; pushing a
 branch and opening a PR is a decision the registry makes on its own, when a
-proposal reaches the corroboration threshold described below. An agent's
-influence ends at the quality of the proposal it commits, which is what keeps
-a single caller from putting anything in front of a human reviewer.
+suggestion reaches the corroboration threshold described below. An agent's
+influence ends at the quality of the suggestion it commits, which is what
+keeps a single caller from putting anything in front of a human reviewer.
 
-Branches are namespaced `proposals/<agent_id>/<skill_name>/<proposal_id>` —
-that's also the lookup key for `list_proposals`. There's no separate status
-field or database row for a proposal: its state *is* whatever's on its
-branch, and once a PR opens, the forge's own merge mechanism takes over.
-Agents send full file content rather than a patch, so the server computes the
-diff itself and callers never need a base they may not have in sync.
+Suggestions are internal bookkeeping inside the registry's own git working
+copy, not a git presence an agent has any stake in: branches are namespaced
+`suggestions/<agent_id>/<skill_name>/<suggestion_id>` — that's also the
+lookup key for `list_suggestions` — but the agent has no credentials, no
+push/fetch access, and no way to reach one except through these tools. There's
+no separate status field or database row for a suggestion: its state *is*
+whatever's on its branch, and once a PR opens, the forge's own merge
+mechanism takes over. Agents send full file content rather than a patch, so
+the server computes the diff itself and callers never need a base they may
+not have in sync.
 
 Deploying it requires an HTTPS clone URL with push access and a write-capable
 credential (GitHub App installation or token). See
@@ -60,16 +65,16 @@ hit the same defect independently, and — left alone — a reviewer gets N pull
 requests describing one bug. Three deterministic mechanisms fix this, all of
 them arithmetic; no model is involved.
 
-**Content-hash deduplication.** Before creating a branch, `propose_change`
+**Content-hash deduplication.** Before creating a branch, `record_suggestion`
 hashes the caller's *prospective* file set and compares it against every
-open proposal for that skill (files normalized first — CRLF, trailing
+open suggestion for that skill (files normalized first — CRLF, trailing
 whitespace, blank lines at EOF — so cosmetic differences don't split a
 cluster). On a match, no branch is created: the caller is recorded as an
-**endorsement** on the existing proposal instead.
+**endorsement** on the existing suggestion instead.
 
 ```mermaid
 flowchart TD
-  Start(["propose_change(agent, skill,\nproposal_id, files)"]) --> OwnBranch{"Agent's own\nbranch exists?"}
+  Start(["record_suggestion(agent, skill,\nsuggestion_id, files)"]) --> OwnBranch{"Agent's own\nbranch exists?"}
 
   OwnBranch -- yes --> Commit["Commit onto that branch\n(iteration, never diverted)"]
   OwnBranch -- no --> AllowDup{"allow_duplicate\nset?"}
@@ -77,7 +82,7 @@ flowchart TD
   AllowDup -- yes --> Commit
   AllowDup -- no --> Hash["Hash the prospective\nfile set (normalized)"]
 
-  Hash --> Match{"Matches another agent's\nopen proposal?"}
+  Hash --> Match{"Matches another agent's\nopen suggestion?"}
 
   Match -- no --> Commit
   Match -- yes --> Endorse["Record caller as endorser\n(no branch created)"]
@@ -95,24 +100,24 @@ flowchart TD
   AutoPR --> Done
 ```
 
-There's deliberately **no tool to endorse a proposal you've merely read and
+There's deliberately **no tool to endorse a suggestion you've merely read and
 agreed with** — an endorsement is only meaningful as evidence if it was produced
-without knowledge of the proposal it lands on. Endorsements are git refs
+without knowledge of the suggestion it lands on. Endorsements are git refs
 (`refs/endorsements/<agent>/<skill>/<id>/<endorser>`), pushed alongside the
-branch on submission; when a proposal advances, earlier endorsements are kept
+branch on submission; when a suggestion advances, earlier endorsements are kept
 but marked `stale` and stop counting.
 
-**Clustering by contested region.** Proposals that aren't identical may still be
-competing answers to one defect. `list_proposal_clusters` diffs each proposal
-against its fork point, extracts the base-side line ranges touched, and unions
-proposals whose ranges overlap within a diff-context window — a stand-in for
-three-way conflict detection that arguably improves on it, since edits that
-would merge cleanly can still be rival answers. Clusters are computed per call,
-never stored.
+**Clustering by contested region.** Suggestions that aren't identical may
+still be competing answers to one defect. `list_suggestion_clusters` diffs
+each suggestion against its fork point, extracts the base-side line ranges
+touched, and unions suggestions whose ranges overlap within a diff-context
+window — a stand-in for three-way conflict detection that arguably improves
+on it, since edits that would merge cleanly can still be rival answers.
+Clusters are computed per call, never stored.
 
 **Auto-submission at a threshold.** `autoSubmitEndorsements` is how many
 independent agents must reach identical content before a PR opens. It's the
-only path to a pull request — set it to `0` and proposals accumulate as
+only path to a pull request — set it to `0` and suggestions accumulate as
 branches on the registry's volume, never pushed anywhere. This chart defaults
 it to `2`, set explicitly in `values.yaml`; the binary's own fallback when the
 env var is unset entirely (running outside the chart) is `0`.
@@ -133,14 +138,14 @@ sequenceDiagram
     participant Reg as skillsd-registry
     participant GH as Git forge
 
-    A1->>Reg: propose_change(fix X)
+    A1->>Reg: record_suggestion(fix X)
     Reg-->>A1: deduplicated: false, corroboration: 1
 
-    A2->>Reg: propose_change(fix X, same content)
+    A2->>Reg: record_suggestion(fix X, same content)
     Reg->>Reg: record endorsement (agent-2)
     Reg-->>A2: deduplicated: true, corroboration: 2
 
-    A3->>Reg: propose_change(fix X, same content)
+    A3->>Reg: record_suggestion(fix X, same content)
     Note over Reg: threshold (2) now met
     Reg->>Reg: record endorsement (agent-3)
     Reg->>GH: push branch + endorsement refs
@@ -162,7 +167,7 @@ false, they're simply absent from this server's `tools/list`.
 |---|---|
 | `report_outcome` | Records one session's outcome for every skill it used. Idempotent on a caller-supplied `report_id`. |
 | `list_skill_signals` | Aggregates reports into one row per `(skill, commit)`: sessions, verdict counts, defect rate. The "what should I fix next" query. |
-| `list_outcome_reports` | The individual reports behind a signal — what actually went wrong, and the `report_id`s a proposing agent cites. |
+| `list_outcome_reports` | The individual reports behind a signal — what actually went wrong, and the `report_id`s a suggesting agent cites. |
 
 Two decisions carry most of the weight:
 
@@ -204,22 +209,22 @@ survives into the pull request.
 **The key is `(skill_name, skill_commit)`.** `report_outcome` requires the
 commit — the one `get_skill` returned — so an outcome attaches to a specific
 version rather than to a skill in general. That's what lets `get_skill_at_ref`
-read exactly the content a report complains about, and what lets a proposing
+read exactly the content a report complains about, and what lets a suggesting
 agent see whether a defect rate rose between two commits. When
 `registry.evidence.verifyCommits` is on (the default), a report naming a
 skill/commit the repository doesn't contain is rejected rather than stored —
-one tree lookup per reported skill, against the same working copy the proposal
-tools use. The usual cause is a commit newer than the registry's last fetch, so
-the error says to retry with the same `report_id`.
+one tree lookup per reported skill, against the same working copy the
+suggestion tools use. The usual cause is a commit newer than the registry's
+last fetch, so the error says to retry with the same `report_id`.
 
 **The citation is `motivating_report_ids`.** It's carried in git, not in a side
 table, so it survives everything downstream:
 
 1. `list_outcome_reports` returns `report_id`s for the sessions that failed.
-2. The agent passes them to `propose_change` as `motivating_report_ids`.
-3. They're written onto the proposal commit as `Motivated-By:` trailers, and
-   read back off the branch whenever a proposal is loaded.
-4. When the proposal is auto-submitted, they're rendered into the PR body —
+2. The agent passes them to `record_suggestion` as `motivating_report_ids`.
+3. They're written onto the suggestion commit as `Motivated-By:` trailers, and
+   read back off the branch whenever a suggestion is loaded.
+4. When the suggestion is auto-submitted, they're rendered into the PR body —
    "Motivated by N recorded outcome report(s)" — next to the endorsing agents.
 
 So a reviewer sees both kinds of independent corroboration at once: how many
@@ -230,9 +235,9 @@ fix.
 A skill can fail in every reported session and nothing happens until agents
 converge on identical content — corroboration is the only trigger, and evidence
 only argues for the fix a human eventually reads. Citation is advisory, not
-enforced: `propose_change` accepts an empty `motivating_report_ids`, and with
-`registry.evidence.enabled` false the evidence tools are absent while the whole
-proposal path works unchanged.
+enforced: `record_suggestion` accepts an empty `motivating_report_ids`, and
+with `registry.evidence.enabled` false the evidence tools are absent while the
+whole suggestion path works unchanged.
 
 The client guide walks an agent through both directions of this loop, step by
 step — see

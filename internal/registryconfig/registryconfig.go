@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/araghukas/skillset/internal/githubauth"
-	"github.com/araghukas/skillset/internal/proposals"
+	"github.com/araghukas/skillset/internal/suggestions"
 )
 
 // defaultMaxRequestBodyBytes and defaultMaxResultBytes apply when their
@@ -29,11 +29,11 @@ type Config struct {
 	HTTPAddr string
 
 	// MaxRequestBodyBytes caps a single incoming MCP request body - the
-	// whole propose_change call, including every file.
+	// whole record_suggestion call, including every file.
 	MaxRequestBodyBytes int64
 
 	// MaxResultBytes caps the context-file content one get_skill_at_ref
-	// call returns, and the diff one get_proposal call returns. Not
+	// call returns, and the diff one get_suggestion call returns. Not
 	// transport-enforced; internal/toolresult applies it when building a
 	// reply, dropping whole files or truncating at a diff hunk boundary
 	// and always naming what was left out.
@@ -47,7 +47,7 @@ type Config struct {
 	// SkillsRepoURL is the HTTPS clone URL of the skills repository.
 	SkillsRepoURL string
 
-	// SkillsRepoBaseBranch is the branch proposals fork from and pull
+	// SkillsRepoBaseBranch is the branch suggestions fork from and pull
 	// requests target.
 	SkillsRepoBaseBranch string
 
@@ -88,7 +88,7 @@ type Config struct {
 	// AutoSubmitEndorsements is how many agents must independently arrive
 	// at identical content before a pull request is opened for it. It is
 	// the only path to a pull request: no tool lets a caller ask for one.
-	// Zero means proposals accumulate as local branches and are never
+	// Zero means suggestions accumulate as local branches and are never
 	// pushed anywhere.
 	//
 	// The threshold is exactly as trustworthy as agent_id is: with
@@ -133,7 +133,7 @@ type Config struct {
 	EvidenceBackupInterval time.Duration
 
 	// MaxFileContentBytes caps a single FileEdit's content, passed
-	// through to proposals.New.
+	// through to suggestions.New.
 	MaxFileContentBytes int
 
 	// LogLevel is the minimum slog level emitted by the process.
@@ -153,7 +153,7 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("parsing FETCH_INTERVAL: %w", err)
 	}
 
-	maxFileContentBytes, err := getenvInt("MAX_FILE_CONTENT_BYTES", proposals.DefaultMaxFileContentBytes)
+	maxFileContentBytes, err := getenvInt("MAX_FILE_CONTENT_BYTES", suggestions.DefaultMaxFileContentBytes)
 	if err != nil {
 		return Config{}, fmt.Errorf("parsing MAX_FILE_CONTENT_BYTES: %w", err)
 	}

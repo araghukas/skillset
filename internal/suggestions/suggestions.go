@@ -1,8 +1,8 @@
-// Package proposals implements the branch-naming convention and
-// orchestration behind the proposal tools: turning an agent's proposed file
-// changes into a commit on a namespaced branch, and reading proposals and
-// skills back out of the underlying gitrepo.Repo.
-package proposals
+// Package suggestions implements the branch-naming convention and
+// orchestration behind the suggestion tools: turning an agent's suggested
+// file changes into a commit on a namespaced branch, and reading
+// suggestions and skills back out of the underlying gitrepo.Repo.
+package suggestions
 
 import (
 	"context"
@@ -20,14 +20,14 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/object"
 )
 
-// sourceThreadTrailerKey is the commit-message trailer a proposal's
+// sourceThreadTrailerKey is the commit-message trailer a suggestion's
 // source_thread_uri is carried in. There's no separate metadata store for
-// proposals - everything about them lives in git, so this rides along in
+// suggestions - everything about them lives in git, so this rides along in
 // the commit message rather than needing a database.
 const sourceThreadTrailerKey = "Source-Thread"
 
 // motivatedByTrailerKey carries one EvidenceService report ID per
-// occurrence. Riding in the commit message means the evidence a proposal
+// occurrence. Riding in the commit message means the evidence a suggestion
 // cites reaches the pull request even when the evidence store itself is
 // disabled, unreachable, or has since aged the reports out.
 const motivatedByTrailerKey = "Motivated-By"
@@ -37,7 +37,7 @@ const motivatedByTrailerKey = "Motivated-By"
 // to be well under this.
 const DefaultMaxFileContentBytes = 1 << 20 // 1 MiB
 
-// Service resolves agent proposals and ref-scoped skill reads against a
+// Service resolves agent suggestions and ref-scoped skill reads against a
 // single gitrepo.Repo.
 type Service struct {
 	repo         *gitrepo.Repo
@@ -54,68 +54,69 @@ func New(repo *gitrepo.Repo, subPath string, maxFileBytes int) *Service {
 	return &Service{repo: repo, subPath: subPath, maxFileBytes: maxFileBytes}
 }
 
-// ProposeChange commits req's file changes onto the caller's proposal
+// RecordSuggestion commits req's file changes onto the caller's suggestion
 // branch, creating it (forked from the current base branch HEAD) if it
 // doesn't already exist, or appending a commit to it otherwise.
 //
 // Before creating a new branch, it checks whether another agent's open
-// proposal for this skill already produces identical content. If one does,
-// no branch is created: the caller is recorded as an endorser of that
-// proposal and it is returned with Deduplicated set. This is where N agents
-// noticing one defect collapse into a single pull request carrying N
+// suggestion for this skill already produces identical content. If one
+// does, no branch is created: the caller is recorded as an endorser of that
+// suggestion and it is returned with Deduplicated set. This is where N
+// agents noticing one defect collapse into a single pull request carrying N
 // signatures, instead of N pull requests saying the same thing.
 //
 // The check is skipped once the caller's own branch exists, so an agent
-// iterating on its own proposal is never diverted onto someone else's
+// iterating on its own suggestion is never diverted onto someone else's
 // mid-flight, and skipped entirely if req.AllowDuplicate is set.
 //
 // The resulting skill is re-validated with skillparse after the commit
-// lands: if the edit breaks SKILL.md's frontmatter, ProposeChange returns
-// an error, but the commit itself is not rolled back - it's still visible
-// via GetProposal, since a proposal branch is just the agent's own history
-// and an invalid intermediate commit there is harmless. The agent is
-// expected to fix it with a follow-up ProposeChange call.
-func (s *Service) ProposeChange(ctx context.Context, req ProposeInput) (*ProposeResult, error) {
+// lands: if the edit breaks SKILL.md's frontmatter, RecordSuggestion
+// returns an error, but the commit itself is not rolled back - it's still
+// visible via GetSuggestion, since a suggestion branch is just the
+// registry's own internal bookkeeping for the agent's history and an
+// invalid intermediate commit there is harmless. The agent is expected to
+// fix it with a follow-up RecordSuggestion call.
+func (s *Service) RecordSuggestion(ctx context.Context, req SuggestInput) (*SuggestResult, error) {
 	if req.SkillName == "" {
-		return nil, fmt.Errorf("proposals: skill_name is required")
+		return nil, fmt.Errorf("suggestions: skill_name is required")
 	}
 	if req.AgentID == "" {
-		return nil, fmt.Errorf("proposals: agent_id is required")
+		return nil, fmt.Errorf("suggestions: agent_id is required")
 	}
-	if req.ProposalID == "" {
-		return nil, fmt.Errorf("proposals: proposal_id is required")
+	if req.SuggestionID == "" {
+		return nil, fmt.Errorf("suggestions: suggestion_id is required")
 	}
 	// The branch name and every annotation ref hanging off it are built by
 	// joining these three with "/", and parsed back by splitting on it.
 	for label, v := range map[string]string{
-		"agent_id":    req.AgentID,
-		"skill_name":  req.SkillName,
-		"proposal_id": req.ProposalID,
+		"agent_id":      req.AgentID,
+		"skill_name":    req.SkillName,
+		"suggestion_id": req.SuggestionID,
 	} {
 		if strings.Contains(v, "/") {
-			return nil, fmt.Errorf("proposals: %s %q must not contain %q", label, v, "/")
+			return nil, fmt.Errorf("suggestions: %s %q must not contain %q", label, v, "/")
 		}
 	}
 	if len(req.Files) == 0 {
-		return nil, fmt.Errorf("proposals: at least one file change is required")
+		return nil, fmt.Errorf("suggestions: at least one file change is required")
 	}
 	for _, fc := range req.Files {
 		if fc.Deleted {
 			continue
 		}
 		if !utf8.ValidString(fc.Content) {
-			return nil, fmt.Errorf("proposals: file %q is not valid UTF-8", fc.FilePath)
+			return nil, fmt.Errorf("suggestions: file %q is not valid UTF-8", fc.FilePath)
 		}
 		if len(fc.Content) > s.maxFileBytes {
-			return nil, fmt.Errorf("proposals: file %q is %d bytes, exceeding the %d byte limit", fc.FilePath, len(fc.Content), s.maxFileBytes)
+			return nil, fmt.Errorf("suggestions: file %q is %d bytes, exceeding the %d byte limit", fc.FilePath, len(fc.Content), s.maxFileBytes)
 		}
 	}
 
-	branch := branchName(req.AgentID, req.SkillName, req.ProposalID)
+	branch := branchName(req.AgentID, req.SkillName, req.SuggestionID)
 
 	base, err := s.repo.BaseHead()
 	if err != nil {
-		return nil, fmt.Errorf("proposals: resolving base branch: %w", err)
+		return nil, fmt.Errorf("suggestions: resolving base branch: %w", err)
 	}
 
 	_, branchErr := s.repo.ResolveRef(branch)
@@ -128,15 +129,15 @@ func (s *Service) ProposeChange(ctx context.Context, req ProposeInput) (*Propose
 		}
 		if dup != nil {
 			if err := s.Endorse(dup.Branch, req.AgentID, plumbing.NewHash(dup.HeadSHA)); err != nil {
-				return nil, fmt.Errorf("proposals: recording endorsement: %w", err)
+				return nil, fmt.Errorf("suggestions: recording endorsement: %w", err)
 			}
-			// Re-read so the returned proposal carries the endorsement
+			// Re-read so the returned suggestion carries the endorsement
 			// just written, and the corroboration count that follows from it.
-			refreshed, err := s.GetProposal(ctx, dup.Branch)
+			refreshed, err := s.GetSuggestion(ctx, dup.Branch)
 			if err != nil {
 				return nil, err
 			}
-			return &ProposeResult{Proposal: refreshed, Deduplicated: true}, nil
+			return &SuggestResult{Suggestion: refreshed, Deduplicated: true}, nil
 		}
 	}
 
@@ -151,7 +152,7 @@ func (s *Service) ProposeChange(ctx context.Context, req ProposeInput) (*Propose
 
 	message := req.CommitMessage
 	if message == "" {
-		message = fmt.Sprintf("propose: %s", req.SkillName)
+		message = fmt.Sprintf("suggest: %s", req.SkillName)
 	}
 	message = appendTrailers(message, req.SourceThreadURI, req.MotivatingReportIDs)
 
@@ -163,31 +164,31 @@ func (s *Service) ProposeChange(ctx context.Context, req ProposeInput) (*Propose
 
 	head, err := s.repo.CommitOnBranch(branch, base, files, message, author)
 	if err != nil {
-		return nil, fmt.Errorf("proposals: committing change: %w", err)
+		return nil, fmt.Errorf("suggestions: committing change: %w", err)
 	}
 
 	if _, err := s.skillAt(ctx, req.SkillName, head); err != nil {
-		return nil, fmt.Errorf("proposals: resulting skill is invalid: %w", err)
+		return nil, fmt.Errorf("suggestions: resulting skill is invalid: %w", err)
 	}
 
-	p, err := s.GetProposal(ctx, branch)
+	sg, err := s.GetSuggestion(ctx, branch)
 	if err != nil {
 		return nil, err
 	}
-	return &ProposeResult{Proposal: p}, nil
+	return &SuggestResult{Suggestion: sg}, nil
 }
 
 // duplicateOf computes the content hash req's changes would produce and
-// returns another agent's open proposal that already matches it, if any.
+// returns another agent's open suggestion that already matches it, if any.
 //
 // The hash is computed from the prospective file set rather than from a
 // commit, so the common case - discovering the duplicate - costs nothing and
 // leaves no abandoned branch behind.
-func (s *Service) duplicateOf(ctx context.Context, req ProposeInput, base plumbing.Hash) (*Proposal, error) {
+func (s *Service) duplicateOf(ctx context.Context, req SuggestInput, base plumbing.Hash) (*Suggestion, error) {
 	current, err := s.skillFilesAt(ctx, req.SkillName, base)
 	if err != nil {
 		// A skill that doesn't exist at base yet can't have a duplicate
-		// proposal to collapse into; let the commit path handle it.
+		// suggestion to collapse into; let the commit path handle it.
 		return nil, nil
 	}
 
@@ -195,21 +196,21 @@ func (s *Service) duplicateOf(ctx context.Context, req ProposeInput, base plumbi
 	return s.findDuplicate(ctx, req.SkillName, req.AgentID, hashFiles(prospective))
 }
 
-// ListProposals returns every proposal, optionally filtered by skill and/or
-// agent.
+// ListSuggestions returns every suggestion, optionally filtered by skill
+// and/or agent.
 //
-// The returned proposals carry no diff. Computing one means a tree-to-tree
-// comparison per branch, and the results land in a calling agent's context
-// window - a listing of twenty proposals should not cost twenty diffs when
-// the caller is choosing which one to look at. Fetch a specific proposal
-// with GetProposal to see its diff.
-func (s *Service) ListProposals(ctx context.Context, skillFilter, agentFilter string) ([]*Proposal, error) {
-	names, err := s.repo.BranchesWithPrefix("proposals/")
+// The returned suggestions carry no diff. Computing one means a
+// tree-to-tree comparison per branch, and the results land in a calling
+// agent's context window - a listing of twenty suggestions should not cost
+// twenty diffs when the caller is choosing which one to look at. Fetch a
+// specific suggestion with GetSuggestion to see its diff.
+func (s *Service) ListSuggestions(ctx context.Context, skillFilter, agentFilter string) ([]*Suggestion, error) {
+	names, err := s.repo.BranchesWithPrefix("suggestions/")
 	if err != nil {
-		return nil, fmt.Errorf("proposals: listing branches: %w", err)
+		return nil, fmt.Errorf("suggestions: listing branches: %w", err)
 	}
 
-	var out []*Proposal
+	var out []*Suggestion
 	for _, name := range names {
 		agentID, skillName, _, ok := parseBranch(name)
 		if !ok {
@@ -222,52 +223,52 @@ func (s *Service) ListProposals(ctx context.Context, skillFilter, agentFilter st
 			continue
 		}
 
-		p, err := s.getProposal(ctx, name, false)
+		sg, err := s.getSuggestion(ctx, name, false)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, p)
+		out = append(out, sg)
 	}
 	return out, nil
 }
 
-// GetProposal fetches a single proposal, with its diff, by its
+// GetSuggestion fetches a single suggestion, with its diff, by its
 // fully-qualified branch name.
-func (s *Service) GetProposal(ctx context.Context, branch string) (*Proposal, error) {
-	return s.getProposal(ctx, branch, true)
+func (s *Service) GetSuggestion(ctx context.Context, branch string) (*Suggestion, error) {
+	return s.getSuggestion(ctx, branch, true)
 }
 
-// getProposal reads one proposal branch. withDiff controls whether the
-// unified diff is computed; see ListProposals for why it is optional.
-func (s *Service) getProposal(ctx context.Context, branch string, withDiff bool) (*Proposal, error) {
-	agentID, skillName, proposalID, ok := parseBranch(branch)
+// getSuggestion reads one suggestion branch. withDiff controls whether the
+// unified diff is computed; see ListSuggestions for why it is optional.
+func (s *Service) getSuggestion(ctx context.Context, branch string, withDiff bool) (*Suggestion, error) {
+	agentID, skillName, suggestionID, ok := parseBranch(branch)
 	if !ok {
-		return nil, fmt.Errorf("proposals: %q is not a proposal branch (want proposals/<agent>/<skill>/<id>)", branch)
+		return nil, fmt.Errorf("suggestions: %q is not a suggestion branch (want suggestions/<agent>/<skill>/<id>)", branch)
 	}
 
 	head, err := s.repo.ResolveRef(branch)
 	if err != nil {
-		return nil, fmt.Errorf("proposals: resolving branch %q: %w", branch, err)
+		return nil, fmt.Errorf("suggestions: resolving branch %q: %w", branch, err)
 	}
 	baseHead, err := s.repo.BaseHead()
 	if err != nil {
-		return nil, fmt.Errorf("proposals: resolving base branch: %w", err)
+		return nil, fmt.Errorf("suggestions: resolving base branch: %w", err)
 	}
 	base, err := s.repo.MergeBase(baseHead, head)
 	if err != nil {
-		return nil, fmt.Errorf("proposals: finding fork point of %q: %w", branch, err)
+		return nil, fmt.Errorf("suggestions: finding fork point of %q: %w", branch, err)
 	}
 
 	var diff string
 	if withDiff {
 		diff, err = s.repo.Diff(base, head)
 		if err != nil {
-			return nil, fmt.Errorf("proposals: diffing %q: %w", branch, err)
+			return nil, fmt.Errorf("suggestions: diffing %q: %w", branch, err)
 		}
 	}
 	log, err := s.repo.Log(base, head)
 	if err != nil {
-		return nil, fmt.Errorf("proposals: reading history of %q: %w", branch, err)
+		return nil, fmt.Errorf("suggestions: reading history of %q: %w", branch, err)
 	}
 
 	commits := make([]Commit, 0, len(log))
@@ -282,8 +283,8 @@ func (s *Service) getProposal(ctx context.Context, branch string, withDiff bool)
 			sourceThreadURI = extractTrailer(c.Message, sourceThreadTrailerKey)
 		}
 		// Report IDs accumulate across the whole branch: each commit cites
-		// what motivated that revision, and the proposal as a whole rests on
-		// all of them.
+		// what motivated that revision, and the suggestion as a whole rests
+		// on all of them.
 		for _, id := range extractTrailers(c.Message, motivatedByTrailerKey) {
 			if _, ok := seenReport[id]; ok {
 				continue
@@ -301,15 +302,15 @@ func (s *Service) getProposal(ctx context.Context, branch string, withDiff bool)
 
 	contentHash, err := s.contentHashAt(ctx, skillName, head)
 	if err != nil {
-		return nil, fmt.Errorf("proposals: hashing %q: %w", branch, err)
+		return nil, fmt.Errorf("suggestions: hashing %q: %w", branch, err)
 	}
 	endorsements, corroboration, err := s.endorsementsFor(branch, head)
 	if err != nil {
-		return nil, fmt.Errorf("proposals: reading endorsements of %q: %w", branch, err)
+		return nil, fmt.Errorf("suggestions: reading endorsements of %q: %w", branch, err)
 	}
 
-	return &Proposal{
-		ProposalID:          proposalID,
+	return &Suggestion{
+		SuggestionID:        suggestionID,
 		Branch:              branch,
 		SkillName:           skillName,
 		AgentID:             agentID,
@@ -331,7 +332,7 @@ func (s *Service) getProposal(ctx context.Context, branch string, withDiff bool)
 func (s *Service) GetSkillAtRef(ctx context.Context, skillName, ref string, includeContextFiles bool) (*skill.Metadata, error) {
 	hash, err := s.repo.ResolveRef(ref)
 	if err != nil {
-		return nil, fmt.Errorf("proposals: resolving ref %q: %w", ref, err)
+		return nil, fmt.Errorf("suggestions: resolving ref %q: %w", ref, err)
 	}
 
 	md, err := s.skillAt(ctx, skillName, hash)
@@ -352,7 +353,7 @@ func (s *Service) GetSkillAtRef(ctx context.Context, skillName, ref string, incl
 func (s *Service) SkillExistsAt(ctx context.Context, skillName, ref string) error {
 	hash, err := s.repo.ResolveRef(ref)
 	if err != nil {
-		return fmt.Errorf("proposals: resolving ref %q: %w", ref, err)
+		return fmt.Errorf("suggestions: resolving ref %q: %w", ref, err)
 	}
 	if _, err := s.skillAt(ctx, skillName, hash); err != nil {
 		return err
@@ -360,14 +361,14 @@ func (s *Service) SkillExistsAt(ctx context.Context, skillName, ref string) erro
 	return nil
 }
 
-// Push pushes a proposal's branch to origin, ahead of a pull request being
+// Push pushes a suggestion's branch to origin, ahead of a pull request being
 // opened for it, along with the endorsement refs attached to it - the
-// corroboration behind a proposal is part of the proposal, and leaving it
-// on a local volume would mean losing the reason the pull request is worth
-// reviewing.
+// corroboration behind a suggestion is part of the suggestion, and leaving
+// it on a local volume would mean losing the reason the pull request is
+// worth reviewing.
 func (s *Service) Push(ctx context.Context, branch string) error {
 	if _, _, _, ok := parseBranch(branch); !ok {
-		return fmt.Errorf("proposals: %q is not a proposal branch (want proposals/<agent>/<skill>/<id>)", branch)
+		return fmt.Errorf("suggestions: %q is not a suggestion branch (want suggestions/<agent>/<skill>/<id>)", branch)
 	}
 	refs, err := s.PushRefs(branch)
 	if err != nil {
@@ -386,7 +387,7 @@ func (s *Service) skillAt(ctx context.Context, skillName string, hash plumbing.H
 	dirPrefix := path.Join(s.subPath, skillName)
 	keys, err := backend.List(ctx, dirPrefix)
 	if err != nil {
-		return nil, fmt.Errorf("proposals: listing %s: %w", dirPrefix, err)
+		return nil, fmt.Errorf("suggestions: listing %s: %w", dirPrefix, err)
 	}
 
 	md, err := skillparse.Load(ctx, backend, s.subPath, skillName, keys)
@@ -397,15 +398,15 @@ func (s *Service) skillAt(ctx context.Context, skillName string, hash plumbing.H
 	return md, nil
 }
 
-// branchName builds the namespaced branch a proposal lives on.
-func branchName(agentID, skillName, proposalID string) string {
-	return fmt.Sprintf("proposals/%s/%s/%s", agentID, skillName, proposalID)
+// branchName builds the namespaced branch a suggestion lives on.
+func branchName(agentID, skillName, suggestionID string) string {
+	return fmt.Sprintf("suggestions/%s/%s/%s", agentID, skillName, suggestionID)
 }
 
 // parseBranch reverses branchName, reporting ok=false if name doesn't
-// follow the proposals/<agent>/<skill>/<id> convention.
-func parseBranch(name string) (agentID, skillName, proposalID string, ok bool) {
-	const prefix = "proposals/"
+// follow the suggestions/<agent>/<skill>/<id> convention.
+func parseBranch(name string) (agentID, skillName, suggestionID string, ok bool) {
+	const prefix = "suggestions/"
 	if !strings.HasPrefix(name, prefix) {
 		return "", "", "", false
 	}
@@ -416,7 +417,7 @@ func parseBranch(name string) (agentID, skillName, proposalID string, ok bool) {
 	return parts[0], parts[1], parts[2], true
 }
 
-// appendTrailers attaches a proposal's out-of-band metadata to its commit
+// appendTrailers attaches a suggestion's out-of-band metadata to its commit
 // message, one trailer line per value.
 func appendTrailers(message, sourceThreadURI string, reportIDs []string) string {
 	var trailers []string

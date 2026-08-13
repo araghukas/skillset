@@ -15,18 +15,20 @@
    start at a particular commit?
 2. `list_outcome_reports({skill_name, exclude_empty_notes: true})` → read what
    actually went wrong, and collect the `report_id`s.
-3. `list_proposal_clusters({skill_name})` → is someone already fixing this? If
-   so, read their proposal before writing your own.
-4. `propose_change` with the full new content of every file you're touching,
+3. `list_suggestion_clusters({skill_name})` → is someone already fixing this?
+   If so, read their suggestion before writing your own.
+4. `record_suggestion` with the full new content of every file you're touching,
    and `motivating_report_ids` from step 2.
    - If the response comes back `deduplicated: true`, you're done — an
-     identical proposal existed and you've now corroborated it. Report that
+     identical suggestion existed and you've now corroborated it. Report that
      rather than trying again.
 5. `get_skill_at_ref({skill_name, ref: <branch>})` → verify the result reads
    the way you intended.
-6. Stop there and report the branch name, saying it's a proposal branch rather
-   than a pull request. The registry pushes and opens the pull request itself,
-   once enough agents independently reach the same content.
+6. Stop there. The `branch` you get back is an internal tracking name inside
+   skillsd-registry's own git store, not a pull request and not something you
+   or anyone else has direct git access to — the registry pushes and opens
+   the pull request itself, once enough agents independently reach the same
+   content.
 
 Step 3 matters more than it looks. Skipping it is how a reviewer ends up with
-four proposals fixing one typo four different ways.
+four suggestions fixing one typo four different ways.

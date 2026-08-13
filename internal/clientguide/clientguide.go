@@ -69,7 +69,7 @@ func mustLoad() *skill.Metadata {
 // deployment-specific content the static embedded files can't know on
 // their own: skillsd appends a one-line count of the skills it serves,
 // skillsd-registry appends a "Repository configuration" section naming the
-// actual repos/branches skills are read from and proposals are opened
+// actual repos/branches skills are read from and suggestions are opened
 // against (see registryconfig.Config and cmd/skillsd-registry/main.go).
 func Instructions(appendix string) string {
 	text := joinContextFiles([]string{"references/intro.md", "references/typical-flow.md"})

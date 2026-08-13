@@ -65,7 +65,7 @@ skillsRepo:
 
 ## 2. Add the write path (optional)
 
-Enable `skillsd-registry` once agents need to propose changes and/or report
+Enable `skillsd-registry` once agents need to suggest changes and/or report
 outcomes. It needs its own, more privileged credential: `Contents: Read and
 write` plus `Pull requests: Read and write`. Keeping it separate from step 1's
 is the point — the read fleet has no business holding something that can push.
@@ -75,10 +75,10 @@ registry:
   enabled: true
   skillsRepo:
     url: "https://github.com/<org>/<skills-repo>.git"
-  # autoSubmitEndorsements is how many agents must independently propose the
+  # autoSubmitEndorsements is how many agents must independently suggest the
   # same fix before a PR opens; omitted here, so it takes the chart's own
   # default of 2. Set it explicitly if you want a different threshold.
-  # A value of 0 means proposals never auto-push.
+  # A value of 0 means suggestions never auto-push.
   autoSubmitEndorsements: 2
   github:
     owner: "<org>"
@@ -154,7 +154,7 @@ sequenceDiagram
     Read-->>Agent: instructions (onboarding guide) + tools/list
     Note over Agent: fully onboarded — no further<br/>docs, schema files, or SDK needed,<br/>no first-use permission prompts
     Agent->>Read: list_skills / get_skill ...
-    Agent->>Write: propose_change / report_outcome ...
+    Agent->>Write: record_suggestion / report_outcome ...
 ```
 
 ## 4. Local development

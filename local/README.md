@@ -168,8 +168,8 @@ claude mcp add --transport http skillsd-registry http://localhost:8081/mcp
 ```
 
 After this, `skillsd`'s tools (`list_skills`, `get_skill`,
-`get_client_guide`) and `skillsd-registry`'s (`propose_change`,
-`get_proposal`, and the rest) should be available in the session.
+`get_client_guide`) and `skillsd-registry`'s (`record_suggestion`,
+`get_suggestion`, and the rest) should be available in the session.
 
 ### 3. Or drive it directly
 
@@ -200,18 +200,18 @@ An unknown `skill_name` comes back as a tool error (`"isError": true` in the
 result), not a protocol-level failure — the call still succeeds at the
 JSON-RPC level.
 
-`propose_change` against `skillsd-registry` — full new file content, not a
+`record_suggestion` against `skillsd-registry` — full new file content, not a
 patch; the server computes the diff:
 
 ```bash
 curl -s -X POST http://localhost:8081/mcp \
   -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
   -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{
-    "name": "propose_change",
+    "name": "record_suggestion",
     "arguments": {
       "skill_name": "internal-comms",
       "agent_id": "agent-1",
-      "proposal_id": "fix-typo",
+      "suggestion_id": "fix-typo",
       "commit_message": "fix typo in description",
       "files": [{"file_path": "SKILL.md", "content": "---\nname: internal-comms\ndescription: fixed description\n---\nbody\n"}]
     }
@@ -223,8 +223,8 @@ working tree` once the branch already has this content committed - expected,
 not a bug.)
 
 Every other tool follows the same `tools/call` shape with its own
-`name`/`arguments` — `get_proposal`, `get_skill_at_ref`, `list_proposals`,
-`list_proposal_clusters`, and (if evidence collection is enabled)
+`name`/`arguments` — `get_suggestion`, `get_skill_at_ref`, `list_suggestions`,
+`list_suggestion_clusters`, and (if evidence collection is enabled)
 `report_outcome`, `list_outcome_reports`, `list_skill_signals`. Call
 `get_client_guide` on either server for the full workflow each tool expects —
 argument shapes and constraints are in each tool's own description and schema
@@ -254,12 +254,12 @@ against outside `make dev` / a real cluster.
 |---|---|
 | `health_test.go` | `/healthz` on both servers, `initialize`'s `instructions`, `tools/list` naming the expected tools |
 | `skills_test.go` | `list_skills`, `get_skill` (found + not-found), `get_client_guide` |
-| `proposals_test.go` | `propose_change` → `get_proposal` → `get_skill_at_ref` → `list_proposals` → `list_proposal_clusters`, plus driving enough corroborating agents to make the registry open a pull request |
+| `suggestions_test.go` | `record_suggestion` → `get_suggestion` → `get_skill_at_ref` → `list_suggestions` → `list_suggestion_clusters`, plus driving enough corroborating agents to make the registry open a pull request |
 | `evidence_test.go` | `report_outcome` (including idempotent replay), `list_outcome_reports`, `list_skill_signals` |
 
 Each file is independently runnable (`go test -tags e2e -run TestGetSkill
-./local/verify/...`) and safely repeatable: the proposal test mints a
-timestamp-suffixed `proposal_id` each run, so it never hits the "clean
+./local/verify/...`) and safely repeatable: the suggestion test mints a
+timestamp-suffixed `suggestion_id` each run, so it never hits the "clean
 working tree" error above. Tests covering an optional feature (the
 auto-submitted pull request, which needs `autoSubmitEndorsements` set and a
 GitHub credential configured; the evidence tools when disabled) call `t.Skip`,

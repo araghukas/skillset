@@ -1,4 +1,4 @@
-package proposaltools
+package suggestiontools
 
 import (
 	"context"
@@ -14,8 +14,8 @@ import (
 	"github.com/araghukas/skillset/internal/githubauth"
 	"github.com/araghukas/skillset/internal/githubpr"
 	"github.com/araghukas/skillset/internal/gitrepo"
-	"github.com/araghukas/skillset/internal/proposals"
 	"github.com/araghukas/skillset/internal/submit"
+	"github.com/araghukas/skillset/internal/suggestions"
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -26,7 +26,7 @@ func validSkillMD(name, description string) string {
 }
 
 // testRig seeds an origin repo containing one skill and wires it up
-// through gitrepo -> proposals -> the MCP tool handlers, with the GitHub
+// through gitrepo -> suggestions -> the MCP tool handlers, with the GitHub
 // client pointed at a stub server that always succeeds.
 type testRig struct {
 	deps    Deps
@@ -75,7 +75,7 @@ func newTestRig(t *testing.T, submitConfigured bool, autoSubmitThreshold int) te
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := proposals.New(repo, "skills", proposals.DefaultMaxFileContentBytes)
+	svc := suggestions.New(repo, "skills", suggestions.DefaultMaxFileContentBytes)
 
 	calls := 0
 	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -91,7 +91,7 @@ func newTestRig(t *testing.T, submitConfigured bool, autoSubmitThreshold int) te
 
 	return testRig{
 		deps: Deps{
-			Proposals:           svc,
+			Suggestions:         svc,
 			Submitter:           submit.New(svc, client, branch),
 			SubmitConfigured:    submitConfigured,
 			AutoSubmitThreshold: autoSubmitThreshold,
@@ -150,23 +150,23 @@ func decodeStructured(t *testing.T, res *mcp.CallToolResult, into any) {
 	}
 }
 
-// TestFullProposalWorkflow exercises the entire path an agent takes over
-// the real MCP protocol: propose a change, list it, and read it back with
+// TestFullSuggestionWorkflow exercises the entire path an agent takes over
+// the real MCP protocol: record a suggestion, list it, and read it back with
 // its diff. This is the end-to-end confirmation that the tool layer, the
 // domain layer, and the underlying git repository actually cooperate - the
 // individual pieces are covered elsewhere, but only this test proves the
 // whole chain works through the protocol these tools are served over.
-func TestFullProposalWorkflow(t *testing.T) {
+func TestFullSuggestionWorkflow(t *testing.T) {
 	rig := newTestRig(t, true, 0)
 	cs := connect(t, rig.deps)
 	ctx := context.Background()
 
 	res, err := cs.CallTool(ctx, &mcp.CallToolParams{
-		Name: "propose_change",
+		Name: "record_suggestion",
 		Arguments: map[string]any{
-			"skill_name":  "frontend-design",
-			"agent_id":    "agent-1",
-			"proposal_id": "fix-typo",
+			"skill_name":    "frontend-design",
+			"agent_id":      "agent-1",
+			"suggestion_id": "fix-typo",
 			"files": []map[string]any{
 				{"file_path": "SKILL.md", "content": validSkillMD("frontend-design", "designs frontends, correctly")},
 			},
@@ -176,48 +176,48 @@ func TestFullProposalWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var proposed ProposeChangeOutput
-	decodeStructured(t, res, &proposed)
-	if proposed.Deduplicated {
-		t.Fatal("first proposal should not be deduplicated")
+	var recorded RecordSuggestionOutput
+	decodeStructured(t, res, &recorded)
+	if recorded.Deduplicated {
+		t.Fatal("first suggestion should not be deduplicated")
 	}
-	branch := proposed.Proposal.Branch
+	branch := recorded.Suggestion.Branch
 	if branch == "" {
-		t.Fatal("proposal has no branch")
+		t.Fatal("suggestion has no branch")
 	}
-	if proposed.Proposal.Corroboration != 1 {
-		t.Errorf("Corroboration = %d, want 1", proposed.Proposal.Corroboration)
+	if recorded.Suggestion.Corroboration != 1 {
+		t.Errorf("Corroboration = %d, want 1", recorded.Suggestion.Corroboration)
 	}
 
-	// list_proposals should find it, without a diff.
+	// list_suggestions should find it, without a diff.
 	res, err = cs.CallTool(ctx, &mcp.CallToolParams{
-		Name:      "list_proposals",
+		Name:      "list_suggestions",
 		Arguments: map[string]any{"skill_name": "frontend-design"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	var list ListProposalsOutput
+	var list ListSuggestionsOutput
 	decodeStructured(t, res, &list)
-	if len(list.Proposals) != 1 {
-		t.Fatalf("expected 1 proposal, got %d", len(list.Proposals))
+	if len(list.Suggestions) != 1 {
+		t.Fatalf("expected 1 suggestion, got %d", len(list.Suggestions))
 	}
-	if list.Proposals[0].Diff != "" {
-		t.Error("list_proposals should not include diffs")
+	if list.Suggestions[0].Diff != "" {
+		t.Error("list_suggestions should not include diffs")
 	}
 
-	// get_proposal should return the same proposal, with its diff this time.
+	// get_suggestion should return the same suggestion, with its diff this time.
 	res, err = cs.CallTool(ctx, &mcp.CallToolParams{
-		Name:      "get_proposal",
+		Name:      "get_suggestion",
 		Arguments: map[string]any{"branch": branch},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	var got proposals.Proposal
+	var got suggestions.Suggestion
 	decodeStructured(t, res, &got)
 	if got.Diff == "" {
-		t.Error("get_proposal should include a diff by default")
+		t.Error("get_suggestion should include a diff by default")
 	}
 	if !strings.Contains(got.Diff, "correctly") {
 		t.Errorf("diff does not mention the change: %q", got.Diff)
@@ -227,7 +227,7 @@ func TestFullProposalWorkflow(t *testing.T) {
 	}
 
 	// A single agent below the threshold reaches no forge at all: the
-	// proposal exists only as a local branch.
+	// suggestion exists only as a local branch.
 	if *rig.ghCalls != 0 {
 		t.Errorf("no pull request should have been opened; forge calls = %d", *rig.ghCalls)
 	}
@@ -246,19 +246,19 @@ func TestNoToolOpensPullRequests(t *testing.T) {
 	}
 	for _, tool := range tools.Tools {
 		switch tool.Name {
-		case "propose_change", "list_proposals", "get_proposal",
-			"list_proposal_clusters", "get_skill_at_ref", "get_client_guide":
+		case "record_suggestion", "list_suggestions", "get_suggestion",
+			"list_suggestion_clusters", "get_skill_at_ref", "get_client_guide":
 		default:
 			t.Errorf("unexpected tool registered: %q", tool.Name)
 		}
 	}
 }
 
-// TestProposeChangeDeduplicatesIdenticalContent covers the mechanism the
+// TestRecordSuggestionDeduplicatesIdenticalContent covers the mechanism the
 // whole registry exists for: two agents independently arriving at the same
-// fix collapse into one proposal with two corroborators, not two competing
+// fix collapse into one suggestion with two corroborators, not two competing
 // pull requests.
-func TestProposeChangeDeduplicatesIdenticalContent(t *testing.T) {
+func TestRecordSuggestionDeduplicatesIdenticalContent(t *testing.T) {
 	rig := newTestRig(t, true, 0)
 	cs := connect(t, rig.deps)
 	ctx := context.Background()
@@ -266,55 +266,55 @@ func TestProposeChangeDeduplicatesIdenticalContent(t *testing.T) {
 	fixed := validSkillMD("frontend-design", "the corrected description")
 
 	first, err := cs.CallTool(ctx, &mcp.CallToolParams{
-		Name: "propose_change",
+		Name: "record_suggestion",
 		Arguments: map[string]any{
-			"skill_name":  "frontend-design",
-			"agent_id":    "agent-1",
-			"proposal_id": "fix",
-			"files":       []map[string]any{{"file_path": "SKILL.md", "content": fixed}},
+			"skill_name":    "frontend-design",
+			"agent_id":      "agent-1",
+			"suggestion_id": "fix",
+			"files":         []map[string]any{{"file_path": "SKILL.md", "content": fixed}},
 		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	var firstOut ProposeChangeOutput
+	var firstOut RecordSuggestionOutput
 	decodeStructured(t, first, &firstOut)
 
 	second, err := cs.CallTool(ctx, &mcp.CallToolParams{
-		Name: "propose_change",
+		Name: "record_suggestion",
 		Arguments: map[string]any{
-			"skill_name":  "frontend-design",
-			"agent_id":    "agent-2",
-			"proposal_id": "same-fix",
-			"files":       []map[string]any{{"file_path": "SKILL.md", "content": fixed}},
+			"skill_name":    "frontend-design",
+			"agent_id":      "agent-2",
+			"suggestion_id": "same-fix",
+			"files":         []map[string]any{{"file_path": "SKILL.md", "content": fixed}},
 		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	var secondOut ProposeChangeOutput
+	var secondOut RecordSuggestionOutput
 	decodeStructured(t, second, &secondOut)
 
 	if !secondOut.Deduplicated {
 		t.Fatal("identical content from a second agent should be deduplicated")
 	}
-	if secondOut.Proposal.Branch != firstOut.Proposal.Branch {
+	if secondOut.Suggestion.Branch != firstOut.Suggestion.Branch {
 		t.Errorf("deduplication landed on a different branch: %q vs %q",
-			secondOut.Proposal.Branch, firstOut.Proposal.Branch)
+			secondOut.Suggestion.Branch, firstOut.Suggestion.Branch)
 	}
-	if secondOut.Proposal.Corroboration != 2 {
-		t.Errorf("Corroboration = %d, want 2", secondOut.Proposal.Corroboration)
+	if secondOut.Suggestion.Corroboration != 2 {
+		t.Errorf("Corroboration = %d, want 2", secondOut.Suggestion.Corroboration)
 	}
 }
 
-// TestProposeChangeAutoSubmitsAtThreshold covers the only path to a pull
+// TestRecordSuggestionAutoSubmitsAtThreshold covers the only path to a pull
 // request: enough independent corroboration opens one, with nobody asking.
 //
 // The third agent matters as much as the second. Every call that lands on
-// an already-submitted proposal finds it at or above the threshold, so the
+// an already-submitted suggestion finds it at or above the threshold, so the
 // submit path is re-entered repeatedly and must return the existing pull
 // request rather than opening another.
-func TestProposeChangeAutoSubmitsAtThreshold(t *testing.T) {
+func TestRecordSuggestionAutoSubmitsAtThreshold(t *testing.T) {
 	rig := newTestRig(t, true, 2)
 	cs := connect(t, rig.deps)
 	ctx := context.Background()
@@ -322,18 +322,18 @@ func TestProposeChangeAutoSubmitsAtThreshold(t *testing.T) {
 	fixed := validSkillMD("frontend-design", "the corrected description")
 	for i, agent := range []string{"agent-1", "agent-2", "agent-3"} {
 		res, err := cs.CallTool(ctx, &mcp.CallToolParams{
-			Name: "propose_change",
+			Name: "record_suggestion",
 			Arguments: map[string]any{
-				"skill_name":  "frontend-design",
-				"agent_id":    agent,
-				"proposal_id": "fix",
-				"files":       []map[string]any{{"file_path": "SKILL.md", "content": fixed}},
+				"skill_name":    "frontend-design",
+				"agent_id":      agent,
+				"suggestion_id": "fix",
+				"files":         []map[string]any{{"file_path": "SKILL.md", "content": fixed}},
 			},
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
-		var out ProposeChangeOutput
+		var out RecordSuggestionOutput
 		decodeStructured(t, res, &out)
 
 		if i == 0 {
@@ -355,7 +355,7 @@ func TestProposeChangeAutoSubmitsAtThreshold(t *testing.T) {
 }
 
 // TestAutoSubmitWithoutCredentialsStaysLocal covers a registry that has a
-// threshold but nothing to submit with. Proposals still commit and still
+// threshold but nothing to submit with. Suggestions still commit and still
 // corroborate; they just never leave the volume.
 func TestAutoSubmitWithoutCredentialsStaysLocal(t *testing.T) {
 	rig := newTestRig(t, false, 2)
@@ -365,18 +365,18 @@ func TestAutoSubmitWithoutCredentialsStaysLocal(t *testing.T) {
 	fixed := validSkillMD("frontend-design", "the corrected description")
 	for _, agent := range []string{"agent-1", "agent-2"} {
 		res, err := cs.CallTool(ctx, &mcp.CallToolParams{
-			Name: "propose_change",
+			Name: "record_suggestion",
 			Arguments: map[string]any{
-				"skill_name":  "frontend-design",
-				"agent_id":    agent,
-				"proposal_id": "fix",
-				"files":       []map[string]any{{"file_path": "SKILL.md", "content": fixed}},
+				"skill_name":    "frontend-design",
+				"agent_id":      agent,
+				"suggestion_id": "fix",
+				"files":         []map[string]any{{"file_path": "SKILL.md", "content": fixed}},
 			},
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
-		var out ProposeChangeOutput
+		var out RecordSuggestionOutput
 		decodeStructured(t, res, &out)
 		if out.AutoSubmitted != nil {
 			t.Fatalf("%s: reported a pull request with no credentials configured", agent)
@@ -387,35 +387,35 @@ func TestAutoSubmitWithoutCredentialsStaysLocal(t *testing.T) {
 	}
 }
 
-func TestGetProposalDiffTruncation(t *testing.T) {
+func TestGetSuggestionDiffTruncation(t *testing.T) {
 	rig := newTestRig(t, true, 0)
 	cs := connect(t, rig.deps)
 	ctx := context.Background()
 
 	big := validSkillMD("frontend-design", strings.Repeat("x", 4096))
 	res, err := cs.CallTool(ctx, &mcp.CallToolParams{
-		Name: "propose_change",
+		Name: "record_suggestion",
 		Arguments: map[string]any{
-			"skill_name":  "frontend-design",
-			"agent_id":    "agent-1",
-			"proposal_id": "big-change",
-			"files":       []map[string]any{{"file_path": "SKILL.md", "content": big}},
+			"skill_name":    "frontend-design",
+			"agent_id":      "agent-1",
+			"suggestion_id": "big-change",
+			"files":         []map[string]any{{"file_path": "SKILL.md", "content": big}},
 		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	var out ProposeChangeOutput
+	var out RecordSuggestionOutput
 	decodeStructured(t, res, &out)
 
 	res, err = cs.CallTool(ctx, &mcp.CallToolParams{
-		Name:      "get_proposal",
-		Arguments: map[string]any{"branch": out.Proposal.Branch, "max_diff_bytes": 100},
+		Name:      "get_suggestion",
+		Arguments: map[string]any{"branch": out.Suggestion.Branch, "max_diff_bytes": 100},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	var got proposals.Proposal
+	var got suggestions.Suggestion
 	decodeStructured(t, res, &got)
 	if !got.DiffTruncated {
 		t.Fatal("expected DiffTruncated to be set for an over-budget diff")
@@ -425,34 +425,34 @@ func TestGetProposalDiffTruncation(t *testing.T) {
 	}
 }
 
-func TestGetProposalOmitDiff(t *testing.T) {
+func TestGetSuggestionOmitDiff(t *testing.T) {
 	rig := newTestRig(t, true, 0)
 	cs := connect(t, rig.deps)
 	ctx := context.Background()
 
 	res, err := cs.CallTool(ctx, &mcp.CallToolParams{
-		Name: "propose_change",
+		Name: "record_suggestion",
 		Arguments: map[string]any{
-			"skill_name":  "frontend-design",
-			"agent_id":    "agent-1",
-			"proposal_id": "fix",
-			"files":       []map[string]any{{"file_path": "SKILL.md", "content": validSkillMD("frontend-design", "fixed")}},
+			"skill_name":    "frontend-design",
+			"agent_id":      "agent-1",
+			"suggestion_id": "fix",
+			"files":         []map[string]any{{"file_path": "SKILL.md", "content": validSkillMD("frontend-design", "fixed")}},
 		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	var out ProposeChangeOutput
+	var out RecordSuggestionOutput
 	decodeStructured(t, res, &out)
 
 	res, err = cs.CallTool(ctx, &mcp.CallToolParams{
-		Name:      "get_proposal",
-		Arguments: map[string]any{"branch": out.Proposal.Branch, "omit_diff": true},
+		Name:      "get_suggestion",
+		Arguments: map[string]any{"branch": out.Suggestion.Branch, "omit_diff": true},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	var got proposals.Proposal
+	var got suggestions.Suggestion
 	decodeStructured(t, res, &got)
 	if got.Diff != "" {
 		t.Errorf("omit_diff should leave the diff empty, got %d bytes", len(got.Diff))
@@ -508,18 +508,18 @@ func TestToolAnnotationsMatchTheirGuarantees(t *testing.T) {
 		byName[tool.Name] = tool
 	}
 
-	tool, ok := byName["propose_change"]
+	tool, ok := byName["record_suggestion"]
 	if !ok {
-		t.Fatal("propose_change not registered")
+		t.Fatal("record_suggestion not registered")
 	}
 	if tool.Annotations.ReadOnlyHint {
-		t.Error("propose_change writes a commit and must not be marked read-only")
+		t.Error("record_suggestion writes a commit and must not be marked read-only")
 	}
 	if tool.Annotations.DestructiveHint == nil || *tool.Annotations.DestructiveHint {
-		t.Error("propose_change should explicitly set DestructiveHint=false (the SDK defaults it to true)")
+		t.Error("record_suggestion should explicitly set DestructiveHint=false (the SDK defaults it to true)")
 	}
 
-	for _, name := range []string{"list_proposals", "get_proposal", "list_proposal_clusters", "get_skill_at_ref"} {
+	for _, name := range []string{"list_suggestions", "get_suggestion", "list_suggestion_clusters", "get_skill_at_ref"} {
 		tool, ok := byName[name]
 		if !ok {
 			t.Errorf("%s not registered", name)

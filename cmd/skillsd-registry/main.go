@@ -16,10 +16,10 @@ import (
 	"github.com/araghukas/skillset/internal/githubpr"
 	"github.com/araghukas/skillset/internal/gitrepo"
 	"github.com/araghukas/skillset/internal/mcphttp"
-	"github.com/araghukas/skillset/internal/proposals"
-	"github.com/araghukas/skillset/internal/proposaltools"
 	"github.com/araghukas/skillset/internal/registryconfig"
 	"github.com/araghukas/skillset/internal/submit"
+	"github.com/araghukas/skillset/internal/suggestions"
+	"github.com/araghukas/skillset/internal/suggestiontools"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -53,23 +53,23 @@ func run() error {
 	}
 	slog.Info("opened skills repo",
 		"dir", cfg.RepoDir, "base_branch", cfg.SkillsRepoBaseBranch, "github_auth_mode", cfg.GitHubAuthMode)
-	svc := proposals.New(repo, cfg.SkillsSubPath, cfg.MaxFileContentBytes)
+	svc := suggestions.New(repo, cfg.SkillsSubPath, cfg.MaxFileContentBytes)
 	gh := githubpr.New(cfg.GitHubAPIBaseURL, cfg.GitHubOwner, cfg.GitHubRepo, cfg.GitHubAuth)
 
 	// Corroboration is the only thing that opens a pull request, so both the
-	// threshold and the credential have to be in place for a proposal to
+	// threshold and the credential have to be in place for a suggestion to
 	// ever leave this pod. Each missing half is worth saying out loud at
-	// startup: the alternative is proposals silently accumulating on a
+	// startup: the alternative is suggestions silently accumulating on a
 	// volume nobody is watching.
 	switch {
 	case cfg.AutoSubmitEndorsements <= 0:
-		slog.Warn("auto-submission is off: proposals will accumulate as local branches and are never pushed",
+		slog.Warn("auto-submission is off: suggestions will accumulate as local branches and are never pushed",
 			"hint", "set AUTO_SUBMIT_ENDORSEMENTS")
 	case !cfg.SubmitConfigured:
 		slog.Warn("auto-submission is configured but no pull request can be opened: GitHub credential, owner, or repo is missing",
 			"threshold", cfg.AutoSubmitEndorsements)
 	default:
-		slog.Info("auto-submission is enabled: proposals corroborated by enough agents open pull requests",
+		slog.Info("auto-submission is enabled: suggestions corroborated by enough agents open pull requests",
 			"threshold", cfg.AutoSubmitEndorsements)
 	}
 
@@ -78,7 +78,7 @@ func run() error {
 	submitter := submit.New(svc, gh, cfg.SkillsRepoBaseBranch)
 
 	// Evidence collection is optional: without it the registry is still a
-	// complete proposal path, just one whose pull requests arrive without
+	// complete suggestion path, just one whose pull requests arrive without
 	// the field data that motivated them. The evidence tools are only
 	// registered below when a store is opened, so a disabled configuration
 	// means those tools are simply absent from tools/list.
@@ -107,8 +107,8 @@ func run() error {
 			Capabilities: &mcp.ServerCapabilities{},
 		},
 	)
-	proposaltools.Add(srv, proposaltools.Deps{
-		Proposals:           svc,
+	suggestiontools.Add(srv, suggestiontools.Deps{
+		Suggestions:         svc,
 		Submitter:           submitter,
 		SubmitConfigured:    cfg.SubmitConfigured,
 		AutoSubmitThreshold: cfg.AutoSubmitEndorsements,
@@ -130,11 +130,11 @@ func run() error {
 }
 
 // repoConfigSection builds the "Repository configuration" section appended
-// to the client guide, naming the two repos/branches a proposal passes
+// to the client guide, naming the two repos/branches a suggestion passes
 // through - the repo skills are read from and forked from, and the repo
-// corroborated proposals open pull requests against. The two are usually the
-// same repo, but nothing enforces that (GitHubOwner/GitHubRepo can name a
-// different repo than SkillsRepoURL points to), so both are spelled out
+// corroborated suggestions open pull requests against. The two are usually
+// the same repo, but nothing enforces that (GitHubOwner/GitHubRepo can name
+// a different repo than SkillsRepoURL points to), so both are spelled out
 // rather than assumed identical.
 func repoConfigSection(cfg registryconfig.Config) string {
 	prRepo := "not configured - no pull requests are opened"
@@ -143,8 +143,8 @@ func repoConfigSection(cfg registryconfig.Config) string {
 	}
 	return fmt.Sprintf(
 		"## Repository configuration\n\n"+
-			"- Skills are read from, and proposals are forked from, %s on branch %q.\n"+
-			"- Corroborated proposals open pull requests against %s, targeting branch %q.\n",
+			"- Skills are read from, and suggestions are forked from, %s on branch %q.\n"+
+			"- Corroborated suggestions open pull requests against %s, targeting branch %q.\n",
 		cfg.SkillsRepoURL, cfg.SkillsRepoBaseBranch,
 		prRepo, cfg.SkillsRepoBaseBranch,
 	)

@@ -24,7 +24,7 @@ const (
 )
 
 // SkillResolver checks that a reported (skill, commit) pair actually
-// existed. It's satisfied by proposals.Service, which already has the
+// existed. It's satisfied by suggestions.Service, which already has the
 // repository open.
 type SkillResolver interface {
 	SkillExistsAt(ctx context.Context, skillName, commit string) error
@@ -68,8 +68,8 @@ func Add(srv *mcp.Server, deps Deps) {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: "list_outcome_reports",
 		Description: "Read the individual reports behind a signal, so you can see what " +
-			"actually went wrong before proposing a fix. Cite the report_id of relevant " +
-			"reports in propose_change's motivating_report_ids.",
+			"actually went wrong before suggesting a fix. Cite the report_id of relevant " +
+			"reports in record_suggestion's motivating_report_ids.",
 		Annotations: readOnly(),
 		InputSchema: withVerdictEnum[ListOutcomeReportsInput]("verdict"),
 	}, listOutcomeReports(deps))

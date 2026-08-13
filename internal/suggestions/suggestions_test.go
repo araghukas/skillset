@@ -1,4 +1,4 @@
-package proposals
+package suggestions
 
 import (
 	"context"
@@ -80,13 +80,13 @@ func validSkillMD(name, description string) string {
 	return "---\nname: " + name + "\ndescription: " + description + "\n---\nbody\n"
 }
 
-func TestProposeChangeCreatesProposal(t *testing.T) {
+func TestRecordSuggestionCreatesSuggestion(t *testing.T) {
 	svc, _ := newTestService(t, "frontend-design", validSkillMD("frontend-design", "designs frontends"))
 
-	res, err := svc.ProposeChange(context.Background(), ProposeInput{
-		SkillName:  "frontend-design",
-		AgentID:    "agent-1",
-		ProposalID: "fix-typo",
+	res, err := svc.RecordSuggestion(context.Background(), SuggestInput{
+		SkillName:    "frontend-design",
+		AgentID:      "agent-1",
+		SuggestionID: "fix-typo",
 		Files: []FileEdit{
 			{FilePath: "SKILL.md", Content: validSkillMD("frontend-design", "designs frontends, fixed")},
 		},
@@ -96,28 +96,28 @@ func TestProposeChangeCreatesProposal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p := res.Proposal
-	if p.Branch != "proposals/agent-1/frontend-design/fix-typo" {
-		t.Fatalf("unexpected branch: %q", p.Branch)
+	sg := res.Suggestion
+	if sg.Branch != "suggestions/agent-1/frontend-design/fix-typo" {
+		t.Fatalf("unexpected branch: %q", sg.Branch)
 	}
-	if len(p.Commits) != 1 {
-		t.Fatalf("expected 1 commit, got %d", len(p.Commits))
+	if len(sg.Commits) != 1 {
+		t.Fatalf("expected 1 commit, got %d", len(sg.Commits))
 	}
-	if p.Diff == "" {
+	if sg.Diff == "" {
 		t.Fatal("expected non-empty diff")
 	}
-	if p.SourceThreadURI != "s3://threads/abc" {
-		t.Fatalf("expected source_thread_uri to round-trip, got %q", p.SourceThreadURI)
+	if sg.SourceThreadURI != "s3://threads/abc" {
+		t.Fatalf("expected source_thread_uri to round-trip, got %q", sg.SourceThreadURI)
 	}
 }
 
-func TestProposeChangeRejectsInvalidFrontmatter(t *testing.T) {
+func TestRecordSuggestionRejectsInvalidFrontmatter(t *testing.T) {
 	svc, _ := newTestService(t, "frontend-design", validSkillMD("frontend-design", "designs frontends"))
 
-	_, err := svc.ProposeChange(context.Background(), ProposeInput{
-		SkillName:  "frontend-design",
-		AgentID:    "agent-1",
-		ProposalID: "break-it",
+	_, err := svc.RecordSuggestion(context.Background(), SuggestInput{
+		SkillName:    "frontend-design",
+		AgentID:      "agent-1",
+		SuggestionID: "break-it",
 		Files: []FileEdit{
 			{FilePath: "SKILL.md", Content: "not valid frontmatter"},
 		},
@@ -128,13 +128,13 @@ func TestProposeChangeRejectsInvalidFrontmatter(t *testing.T) {
 	}
 }
 
-func TestProposeChangeRejectsNonUTF8Content(t *testing.T) {
+func TestRecordSuggestionRejectsNonUTF8Content(t *testing.T) {
 	svc, _ := newTestService(t, "frontend-design", validSkillMD("frontend-design", "designs frontends"))
 
-	_, err := svc.ProposeChange(context.Background(), ProposeInput{
-		SkillName:  "frontend-design",
-		AgentID:    "agent-1",
-		ProposalID: "bad-encoding",
+	_, err := svc.RecordSuggestion(context.Background(), SuggestInput{
+		SkillName:    "frontend-design",
+		AgentID:      "agent-1",
+		SuggestionID: "bad-encoding",
 		Files: []FileEdit{
 			{FilePath: "SKILL.md", Content: string([]byte{0x89, 0x50, 0x4E, 0x47, 0xFF, 0xFE})},
 		},
@@ -145,13 +145,13 @@ func TestProposeChangeRejectsNonUTF8Content(t *testing.T) {
 	}
 }
 
-func TestProposeChangeRejectsOversizedContent(t *testing.T) {
+func TestRecordSuggestionRejectsOversizedContent(t *testing.T) {
 	svc, _ := newTestService(t, "frontend-design", validSkillMD("frontend-design", "designs frontends"))
 
-	_, err := svc.ProposeChange(context.Background(), ProposeInput{
-		SkillName:  "frontend-design",
-		AgentID:    "agent-1",
-		ProposalID: "too-big",
+	_, err := svc.RecordSuggestion(context.Background(), SuggestInput{
+		SkillName:    "frontend-design",
+		AgentID:      "agent-1",
+		SuggestionID: "too-big",
 		Files: []FileEdit{
 			{FilePath: "SKILL.md", Content: strings.Repeat("a", DefaultMaxFileContentBytes+1)},
 		},
@@ -162,14 +162,14 @@ func TestProposeChangeRejectsOversizedContent(t *testing.T) {
 	}
 }
 
-func TestProposeChangeAllowsOversizedContentWhenDeleted(t *testing.T) {
+func TestRecordSuggestionAllowsOversizedContentWhenDeleted(t *testing.T) {
 	svc, _ := newTestService(t, "frontend-design", validSkillMD("frontend-design", "designs frontends"))
 
 	// Content is ignored (and thus not validated) when deleted is set.
-	_, err := svc.ProposeChange(context.Background(), ProposeInput{
-		SkillName:  "frontend-design",
-		AgentID:    "agent-1",
-		ProposalID: "delete-something",
+	_, err := svc.RecordSuggestion(context.Background(), SuggestInput{
+		SkillName:    "frontend-design",
+		AgentID:      "agent-1",
+		SuggestionID: "delete-something",
 		Files: []FileEdit{
 			{FilePath: "SKILL.md", Content: validSkillMD("frontend-design", "kept")},
 			{FilePath: "references/old.txt", Deleted: true, Content: strings.Repeat("a", DefaultMaxFileContentBytes+1)},
@@ -181,15 +181,15 @@ func TestProposeChangeAllowsOversizedContentWhenDeleted(t *testing.T) {
 	}
 }
 
-func TestProposeChangeAppendsSecondCommitOnRepeatCall(t *testing.T) {
+func TestRecordSuggestionAppendsSecondCommitOnRepeatCall(t *testing.T) {
 	svc, _ := newTestService(t, "frontend-design", validSkillMD("frontend-design", "designs frontends"))
 	ctx := context.Background()
 
-	req := func(desc string) ProposeInput {
-		return ProposeInput{
-			SkillName:  "frontend-design",
-			AgentID:    "agent-1",
-			ProposalID: "iterate",
+	req := func(desc string) SuggestInput {
+		return SuggestInput{
+			SkillName:    "frontend-design",
+			AgentID:      "agent-1",
+			SuggestionID: "iterate",
 			Files: []FileEdit{
 				{FilePath: "SKILL.md", Content: validSkillMD("frontend-design", desc)},
 			},
@@ -197,39 +197,39 @@ func TestProposeChangeAppendsSecondCommitOnRepeatCall(t *testing.T) {
 		}
 	}
 
-	if _, err := svc.ProposeChange(ctx, req("v1")); err != nil {
+	if _, err := svc.RecordSuggestion(ctx, req("v1")); err != nil {
 		t.Fatal(err)
 	}
-	res, err := svc.ProposeChange(ctx, req("v2"))
+	res, err := svc.RecordSuggestion(ctx, req("v2"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	p := res.Proposal
-	if len(p.Commits) != 2 {
-		t.Fatalf("expected 2 commits after two ProposeChange calls on the same proposal, got %d", len(p.Commits))
+	sg := res.Suggestion
+	if len(sg.Commits) != 2 {
+		t.Fatalf("expected 2 commits after two RecordSuggestion calls on the same suggestion, got %d", len(sg.Commits))
 	}
 }
 
-func TestGetProposalRejectsNonProposalBranch(t *testing.T) {
+func TestGetSuggestionRejectsNonSuggestionBranch(t *testing.T) {
 	svc, branch := newTestService(t, "frontend-design", validSkillMD("frontend-design", "designs frontends"))
 
-	if _, err := svc.GetProposal(context.Background(), branch); err == nil {
-		t.Fatal("expected error for a branch outside the proposals/ namespace")
+	if _, err := svc.GetSuggestion(context.Background(), branch); err == nil {
+		t.Fatal("expected error for a branch outside the suggestions/ namespace")
 	}
 }
 
-func TestListProposalsFiltersBySkillAndAgent(t *testing.T) {
+func TestListSuggestionsFiltersBySkillAndAgent(t *testing.T) {
 	svc, _ := newTestService(t, "frontend-design", validSkillMD("frontend-design", "designs frontends"))
 	ctx := context.Background()
 
-	mustPropose := func(agentID, proposalID string) {
+	mustSuggest := func(agentID, suggestionID string) {
 		t.Helper()
-		_, err := svc.ProposeChange(ctx, ProposeInput{
-			SkillName:  "frontend-design",
-			AgentID:    agentID,
-			ProposalID: proposalID,
+		_, err := svc.RecordSuggestion(ctx, SuggestInput{
+			SkillName:    "frontend-design",
+			AgentID:      agentID,
+			SuggestionID: suggestionID,
 			Files: []FileEdit{
-				{FilePath: "SKILL.md", Content: validSkillMD("frontend-design", agentID+"-"+proposalID)},
+				{FilePath: "SKILL.md", Content: validSkillMD("frontend-design", agentID+"-"+suggestionID)},
 			},
 			CommitMessage: "change",
 		})
@@ -237,27 +237,27 @@ func TestListProposalsFiltersBySkillAndAgent(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	mustPropose("agent-1", "a")
-	mustPropose("agent-2", "b")
+	mustSuggest("agent-1", "a")
+	mustSuggest("agent-2", "b")
 
-	all, err := svc.ListProposals(ctx, "", "")
+	all, err := svc.ListSuggestions(ctx, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(all) != 2 {
-		t.Fatalf("expected 2 proposals, got %d", len(all))
+		t.Fatalf("expected 2 suggestions, got %d", len(all))
 	}
 
-	byAgent, err := svc.ListProposals(ctx, "", "agent-1")
+	byAgent, err := svc.ListSuggestions(ctx, "", "agent-1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(byAgent) != 1 || byAgent[0].AgentID != "agent-1" {
-		t.Fatalf("expected only agent-1's proposal, got %+v", byAgent)
+		t.Fatalf("expected only agent-1's suggestion, got %+v", byAgent)
 	}
 }
 
-func TestGetSkillAtRefResolvesBaseAndProposalBranch(t *testing.T) {
+func TestGetSkillAtRefResolvesBaseAndSuggestionBranch(t *testing.T) {
 	svc, branch := newTestService(t, "frontend-design", validSkillMD("frontend-design", "original"))
 	ctx := context.Background()
 
@@ -269,10 +269,10 @@ func TestGetSkillAtRefResolvesBaseAndProposalBranch(t *testing.T) {
 		t.Fatalf("expected base description %q, got %q", "original", atBase.Description)
 	}
 
-	res, err := svc.ProposeChange(ctx, ProposeInput{
-		SkillName:  "frontend-design",
-		AgentID:    "agent-1",
-		ProposalID: "update-desc",
+	res, err := svc.RecordSuggestion(ctx, SuggestInput{
+		SkillName:    "frontend-design",
+		AgentID:      "agent-1",
+		SuggestionID: "update-desc",
 		Files: []FileEdit{
 			{FilePath: "SKILL.md", Content: validSkillMD("frontend-design", "updated")},
 		},
@@ -282,15 +282,15 @@ func TestGetSkillAtRefResolvesBaseAndProposalBranch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	atProposal, err := svc.GetSkillAtRef(ctx, "frontend-design", res.Proposal.Branch, false)
+	atSuggestion, err := svc.GetSkillAtRef(ctx, "frontend-design", res.Suggestion.Branch, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if atProposal.Description != "updated" {
-		t.Fatalf("expected proposal description %q, got %q", "updated", atProposal.Description)
+	if atSuggestion.Description != "updated" {
+		t.Fatalf("expected suggestion description %q, got %q", "updated", atSuggestion.Description)
 	}
 
-	// The base branch itself must be unaffected by the proposal.
+	// The base branch itself must be unaffected by the suggestion.
 	atBaseAfter, err := svc.GetSkillAtRef(ctx, "frontend-design", branch, false)
 	if err != nil {
 		t.Fatal(err)
@@ -304,9 +304,9 @@ func TestGetSkillAtRefResolvesBaseAndProposalBranch(t *testing.T) {
 // the registry's onboarding footer relies on: skillparse.Load is shared
 // between internal/registry (which appends the footer before serving) and
 // this package (which reads content straight out of git for diffing and
-// dedup). If the footer ever leaked in here, every proposal's diff would
+// dedup). If the footer ever leaked in here, every suggestion's diff would
 // show it as a spurious removal, and dedup hashing would drift from what
-// was actually proposed.
+// was actually suggested.
 func TestGetSkillAtRefNeverCarriesRegistryOnboardingFooter(t *testing.T) {
 	svc, branch := newTestService(t, "frontend-design", validSkillMD("frontend-design", "original"))
 
@@ -319,7 +319,7 @@ func TestGetSkillAtRefNeverCarriesRegistryOnboardingFooter(t *testing.T) {
 		if cf.FilePath != "SKILL.md" {
 			continue
 		}
-		if strings.Contains(cf.Content, "ProposeChange") {
+		if strings.Contains(cf.Content, "RecordSuggestion") {
 			t.Fatalf("expected git-sourced SKILL.md content to be free of the served onboarding footer, got: %q", cf.Content)
 		}
 		if cf.Content != validSkillMD("frontend-design", "original") {
@@ -340,10 +340,10 @@ func TestGetSkillAtRefEmptyRefResolvesToBaseHead(t *testing.T) {
 	}
 }
 
-func TestPushRejectsNonProposalBranch(t *testing.T) {
+func TestPushRejectsNonSuggestionBranch(t *testing.T) {
 	svc, branch := newTestService(t, "frontend-design", validSkillMD("frontend-design", "original"))
 
 	if err := svc.Push(context.Background(), branch); err == nil {
-		t.Fatal("expected error pushing a non-proposal branch")
+		t.Fatal("expected error pushing a non-suggestion branch")
 	}
 }

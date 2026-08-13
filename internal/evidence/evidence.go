@@ -3,7 +3,7 @@
 //
 // This is the one piece of skillset that is not derived from git.
 //
-// A skill's content, a proposal, its endorsements, its submission - all of
+// A skill's content, a suggestion, its endorsements, its submission - all of
 // those are recomputable from the repository, and losing this component's
 // volume costs nothing but a re-clone. Outcome reports are different: they
 // are primary observations of how a skill behaved in the field, they exist
@@ -365,7 +365,7 @@ func (s *Store) ListSignals(ctx context.Context, skillName string, minReportedSe
 }
 
 // ListReports returns the individual observations behind a signal,
-// most-recent-first, so an agent about to propose a fix can read what
+// most-recent-first, so an agent about to suggest a fix can read what
 // actually went wrong instead of inferring it from a rate.
 func (s *Store) ListReports(ctx context.Context, f ReportFilter) ([]StoredOutcome, error) {
 	query := `
@@ -423,7 +423,7 @@ func (s *Store) ListReports(ctx context.Context, f ReportFilter) ([]StoredOutcom
 // This is lossy by design: the aggregate counts survive forever, the notes
 // and individual report IDs do not. Keeping raw rows indefinitely would
 // grow the volume without bound for the sake of prose nobody reads after
-// the proposal it motivated has merged.
+// the suggestion it motivated has merged.
 func (s *Store) Rollup(ctx context.Context, cutoff time.Time) (int64, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {

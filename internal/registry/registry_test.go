@@ -168,7 +168,7 @@ func TestLoadSkipsNonUTF8ContextFiles(t *testing.T) {
 
 // TestLoadAppendsOnboardingFooterToSkillMd is a regression test for the
 // self-onboarding footer: every served skill's SKILL.md content should
-// carry a short note pointing agents at the proposal workflow, even when
+// carry a short note pointing agents at the suggestion workflow, even when
 // the installer's own system prompt says nothing about skillsd.
 func TestLoadAppendsOnboardingFooterToSkillMd(t *testing.T) {
 	root := t.TempDir()
@@ -189,7 +189,7 @@ func TestLoadAppendsOnboardingFooterToSkillMd(t *testing.T) {
 	if !ok {
 		t.Fatal("expected a SKILL.md context file")
 	}
-	if !strings.Contains(skillMD.Content, "propose_change") {
+	if !strings.Contains(skillMD.Content, "record_suggestion") {
 		t.Fatalf("expected SKILL.md content to carry the onboarding footer, got: %q", skillMD.Content)
 	}
 	if !strings.HasPrefix(skillMD.Content, "---\nname: frontend-design") {
@@ -200,7 +200,7 @@ func TestLoadAppendsOnboardingFooterToSkillMd(t *testing.T) {
 	if !ok {
 		t.Fatal("expected a references/notes.txt context file")
 	}
-	if strings.Contains(notes.Content, "propose_change") {
+	if strings.Contains(notes.Content, "record_suggestion") {
 		t.Fatalf("expected the onboarding footer to be appended only to SKILL.md, not to supporting files, got: %q", notes.Content)
 	}
 }

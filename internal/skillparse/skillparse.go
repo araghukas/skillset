@@ -1,7 +1,7 @@
 // Package skillparse reads a single skill's SKILL.md frontmatter and
 // supporting context files off a storage.Backend and builds the
 // skill.Metadata for it. It is shared by internal/registry (a static,
-// once-loaded index) and the git-backed proposal reader (which resolves the
+// once-loaded index) and the git-backed suggestion reader (which resolves the
 // same shape at an arbitrary commit), so the two never drift in how they
 // parse or validate a skill.
 package skillparse

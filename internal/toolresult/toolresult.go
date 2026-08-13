@@ -22,7 +22,7 @@ import (
 // DefaultMaxBytes bounds the total context-file content one call returns.
 const DefaultMaxBytes = 256 << 10 // 256 KiB
 
-// DefaultMaxDiffBytes bounds a unified diff carried in a proposal.
+// DefaultMaxDiffBytes bounds a unified diff carried in a suggestion.
 const DefaultMaxDiffBytes = 64 << 10 // 64 KiB
 
 // Text is a shorthand for a single text content block.
