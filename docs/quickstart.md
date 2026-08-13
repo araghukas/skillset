@@ -125,22 +125,19 @@ curl -fsSL https://raw.githubusercontent.com/araghukas/skillset/main/scripts/onb
   --registry-url http://skillsd-registry.<namespace>.svc.cluster.local:8081/mcp
 ```
 
-This registers the `skillsd` and `skillsd-registry` MCP servers and
-pre-approves all of their tools in the agent's permissions, by editing
-`.claude/settings.json` and `.mcp.json` in the directory where it's
-invoked.
+This registers the `skillsd` and `skillsd-registry` MCP servers, pre-approves
+all of their tools in the agent's permissions, and assigns the agent a stable
+`SKILLSET_AGENT_ID` — by editing `.claude/settings.json` and `.mcp.json` in the
+directory where it's invoked.
 
-<details> <summary>Or, by hand</summary>
+It also installs hooks that hold the agent to the reporting contract: a turn
+that loads a skill is blocked from ending until it has called `report_outcome`
+for it, with the skill's `commit` handed back so the report can name a version.
+Pass `--no-hooks` to skip them; they're skipped anyway when no
+`--registry-url` is configured, since there's nowhere to report to.
 
-```bash
-claude mcp add --transport http skillsd http://skillsd.<namespace>.svc.cluster.local:8080/mcp
-claude mcp add --transport http skillsd-registry http://skillsd-registry.<namespace>.svc.cluster.local:8081/mcp
-```
-
-With plain `claude mcp add`, both servers still connect but each tool
-prompts for permission on first use until `settings.json` is also updated.
-
-</details>
+The hooks are [scripts/skillset-hook.sh](../scripts/skillset-hook.sh), which
+the onboarding script carries a copy of and writes to `~/.claude/skillset/`.
 
 ```mermaid
 sequenceDiagram
@@ -148,13 +145,16 @@ sequenceDiagram
     participant Agent as AI Agent
     participant Read as skillsd :8080
     participant Write as skillsd-registry :8081
+    participant Hook as reporting hooks
 
-    Op->>Agent: onboarding script (registers servers + permissions)
+    Op->>Agent: onboarding script (registers servers + permissions + hooks)
     Agent->>Read: initialize
     Read-->>Agent: instructions (onboarding guide) + tools/list
     Note over Agent: fully onboarded — no further<br/>docs, schema files, or SDK needed,<br/>no first-use permission prompts
     Agent->>Read: list_skills / get_skill ...
+    Hook->>Hook: remember skill@commit as owed
     Agent->>Write: record_suggestion / report_outcome ...
+    Hook->>Agent: turn ends — block until every skill is reported
 ```
 
 ## 4. Local development

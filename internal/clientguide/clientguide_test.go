@@ -108,6 +108,29 @@ func TestGuideAdvertisesNoSubmitTool(t *testing.T) {
 	}
 }
 
+// TestGuideAsksForPerTurnReporting pins the reporting cadence the whole
+// evidence pipeline is built on. The guide is assembled from several files
+// and delivered three ways, so a stray "at the end of the session" in one
+// of them is easy to write and impossible to spot: agents would batch a
+// session's skills into one report, and report_count would then mean
+// different things for different clients.
+func TestGuideAsksForPerTurnReporting(t *testing.T) {
+	full, err := guideText("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, text := range map[string]string{"instructions": Instructions(""), "full guide": full} {
+		if !strings.Contains(text, "each turn") && !strings.Contains(text, "the turn") {
+			t.Errorf("%s never tells the agent to report per turn", name)
+		}
+		for _, phrase := range []string{"end of the session", "end of each session", "once per session"} {
+			if strings.Contains(text, phrase) {
+				t.Errorf("%s asks for session-scoped reporting (%q); reporting is per turn", name, phrase)
+			}
+		}
+	}
+}
+
 // TestInstructionsAppendsAppendix confirms a non-empty appendix string is
 // appended after the guide sections - the mechanism skillsd (a skill
 // count) and skillsd-registry (a repo configuration section) both rely on.

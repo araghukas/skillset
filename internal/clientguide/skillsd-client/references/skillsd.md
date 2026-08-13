@@ -27,10 +27,10 @@ makes to its other files by path.
 - Binary and non-UTF-8 files are silently omitted, since content is carried as
   text. Expect a skill's `assets/` to be incomplete if it holds binaries.
 
-**Keep the `commit` field** from every skill you fetch. You need it for
-`report_outcome` on `skillsd-registry`: a report that names a skill but not a
-version can't tell anyone whether a recent edit broke something or it was
-always broken.
+**Keep the `commit` field** from every skill you fetch, until you report on
+it at the end of the turn. `report_outcome` on `skillsd-registry` needs it: a
+report that names a skill but not a version can't tell anyone whether a recent
+edit broke something or it was always broken.
 
 **`get_client_guide()`** — fetches this document, as of the running server's
 build. No arguments.

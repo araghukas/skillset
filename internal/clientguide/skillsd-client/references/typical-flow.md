@@ -6,8 +6,9 @@
    `description`.
 2. `get_skill({skill_name, include_context_files: true})` → read `SKILL.md`
    and its supporting files to actually use the skill. **Keep the `commit`.**
-3. At the end of the session, `report_outcome` with one entry per skill you
-   used — including the ones that worked.
+3. Before you finish the turn, `report_outcome` with one entry per skillsd skill that
+   the turn used — including the ones that worked. One call per turn, with a
+   fresh `report_id`; reuse a `report_id` only to retry the same call.
 
 **Fixing a skill**, whether you were asked to or noticed a problem yourself:
 

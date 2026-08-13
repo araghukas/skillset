@@ -191,8 +191,8 @@ func TestReportOutcomeRoundTrip(t *testing.T) {
 		t.Fatalf("expected 1 signal for beta, got %d", len(signals.Signals))
 	}
 	sig := signals.Signals[0]
-	if sig.ReportedSessions != 1 {
-		t.Errorf("ReportedSessions = %d, want 1", sig.ReportedSessions)
+	if sig.ReportCount != 1 {
+		t.Errorf("ReportCount = %d, want 1", sig.ReportCount)
 	}
 	if len(sig.VerdictCounts) != 1 || sig.VerdictCounts[0].Verdict != "contradicted" {
 		t.Errorf("VerdictCounts = %+v, want one contradicted entry", sig.VerdictCounts)
@@ -431,7 +431,7 @@ func TestVerdictSignalOrderingIsDeterministic(t *testing.T) {
 	}
 }
 
-func TestListSkillSignalsMinReportedSessionsDefaultsToOne(t *testing.T) {
+func TestListSkillSignalsMinReportCountDefaultsToOne(t *testing.T) {
 	deps := testDeps(t, false)
 	cs := connect(t, deps)
 	ctx := context.Background()
@@ -461,7 +461,7 @@ func TestListSkillSignalsMinReportedSessionsDefaultsToOne(t *testing.T) {
 	var out ListSkillSignalsOutput
 	decodeStructured(t, res, &out)
 	if len(out.Signals) != 1 {
-		t.Fatalf("a single reported session should be visible with the default min_reported_sessions, got %d signals", len(out.Signals))
+		t.Fatalf("a single report should be visible with the default min_report_count, got %d signals", len(out.Signals))
 	}
 }
 

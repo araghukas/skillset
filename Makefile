@@ -57,6 +57,17 @@ fmt: ## Format Go source
 clean: ## Remove build artifacts
 	rm -rf bin/
 
+## --- Scripts ---
+
+.PHONY: hook-embed
+hook-embed: ## Regenerate onboard-claude.sh's embedded copy of skillset-hook.sh
+	./scripts/embed-hook.sh
+
+.PHONY: test-scripts
+test-scripts: ## Test the Claude Code hook script and the settings.json merge
+	./scripts/embed-hook.sh --check
+	./scripts/skillset-hook_test.sh
+
 ## --- Docker ---
 
 .PHONY: docker-build

@@ -1,0 +1,16 @@
+{
+  "session_id": "@@SESSION@@",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "mcp__skillsd__get_skill",
+  "tool_input": {
+    "skill_name": "@@SKILL@@"
+  },
+  "tool_response": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"skill\":{\"name\":\"@@SKILL@@\",\"commit\":\"@@COMMIT@@\"}}"
+      }
+    ]
+  }
+}

@@ -165,16 +165,20 @@ false, they're simply absent from this server's `tools/list`.
 
 | Tool | Purpose |
 |---|---|
-| `report_outcome` | Records one session's outcome for every skill it used. Idempotent on a caller-supplied `report_id`. |
-| `list_skill_signals` | Aggregates reports into one row per `(skill, commit)`: sessions, verdict counts, defect rate. The "what should I fix next" query. |
+| `report_outcome` | Records one turn's outcome for every skill that turn used. Idempotent on a caller-supplied `report_id`. |
+| `list_skill_signals` | Aggregates reports into one row per `(skill, commit)`: report count, verdict counts, defect rate. The "what should I fix next" query. |
 | `list_outcome_reports` | The individual reports behind a signal — what actually went wrong, and the `report_id`s a suggesting agent cites. |
 
 Two decisions carry most of the weight:
 
 - **The agent reports usage; the server doesn't observe it.** A `get_skill`
   call isn't usage — a skill that influenced a task is. Reporting is one call
-  per *session*, not per fetch, which keeps the read fleet stateless and gives
-  a meaningful denominator.
+  per *turn*, not per fetch, which keeps the read fleet stateless and gives a
+  meaningful denominator. A turn is the largest unit an agent can still
+  describe accurately: by the end of a long session it no longer remembers
+  which skill misled it where, and a session that crashes or is interrupted
+  reports nothing at all. Using one skill across four turns is four
+  observations, not one — it can hold up three times and fail the fourth.
 - **Verdicts are observable outcomes, not satisfaction ratings.** Each one
   implies a different repair:
 
@@ -193,9 +197,12 @@ fixing the body would be the wrong repair. Grouping by commit is what makes
 regressions visible — a defect rate that jumps between successive commits of one
 skill is a merge that made things worse.
 
-**On rates.** `reported_sessions` counts sessions that *reported*, never
-sessions that ran — a crashed session never reports. Every rate is "among
-sessions that reported"; don't let a dashboard quietly drop that qualifier.
+**On rates.** `report_count` counts reports that were *filed*, never uses that
+happened — a turn that used a skill and said nothing leaves no trace. Every
+rate is "among reports filed"; don't let a dashboard quietly drop that
+qualifier. The counter is deliberately not per session: reports arrive per
+turn, so counting sessions would weigh a client that reports once at the end
+differently from one that reports as it goes.
 
 **On durability and storage**, including the retention/backup policy for the
 SQLite database backing this service, see
@@ -220,7 +227,7 @@ last fetch, so the error says to retry with the same `report_id`.
 **The citation is `motivating_report_ids`.** It's carried in git, not in a side
 table, so it survives everything downstream:
 
-1. `list_outcome_reports` returns `report_id`s for the sessions that failed.
+1. `list_outcome_reports` returns `report_id`s for the turns that failed.
 2. The agent passes them to `record_suggestion` as `motivating_report_ids`.
 3. They're written onto the suggestion commit as `Motivated-By:` trailers, and
    read back off the branch whenever a suggestion is loaded.
@@ -228,11 +235,11 @@ table, so it survives everything downstream:
    "Motivated by N recorded outcome report(s)" — next to the endorsing agents.
 
 So a reviewer sees both kinds of independent corroboration at once: how many
-agents converged on this content, and how many recorded sessions it claims to
+agents converged on this content, and how many recorded failures it claims to
 fix.
 
 **What is deliberately not connected.** No defect rate opens a pull request.
-A skill can fail in every reported session and nothing happens until agents
+A skill can fail in every report filed and nothing happens until agents
 converge on identical content — corroboration is the only trigger, and evidence
 only argues for the fix a human eventually reads. Citation is advisory, not
 enforced: `record_suggestion` accepts an empty `motivating_report_ids`, and

@@ -49,8 +49,8 @@ func TestRecordReportIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(signals) != 1 || signals[0].ReportedSessions != 1 {
-		t.Fatalf("expected the replay to leave exactly 1 session, got %+v", signals)
+	if len(signals) != 1 || signals[0].ReportCount != 1 {
+		t.Fatalf("expected the replay to leave exactly 1 report, got %+v", signals)
 	}
 }
 
@@ -78,7 +78,7 @@ func TestSignalRatesSeparateContentDefectsFromMistriggering(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 
-	// Ten sessions on one commit: 2 contradicted, 1 incomplete (content
+	// Ten reports on one commit: 2 contradicted, 1 incomplete (content
 	// defects), 4 not-applicable (a description problem), 3 clean.
 	verdicts := []Verdict{
 		VerdictContradicted, VerdictContradicted, VerdictIncomplete,
@@ -103,8 +103,8 @@ func TestSignalRatesSeparateContentDefectsFromMistriggering(t *testing.T) {
 	}
 	s := signals[0]
 
-	if s.ReportedSessions != 10 {
-		t.Fatalf("expected 10 reported sessions, got %d", s.ReportedSessions)
+	if s.ReportCount != 10 {
+		t.Fatalf("expected 10 reports, got %d", s.ReportCount)
 	}
 	if s.DefectRate != 0.3 {
 		t.Fatalf("expected a defect rate of 0.3 (2 contradicted + 1 incomplete), got %v", s.DefectRate)
@@ -158,7 +158,7 @@ func TestSignalsSplitByCommitSoRegressionsAreVisible(t *testing.T) {
 	}
 }
 
-func TestMinReportedSessionsSuppressesThinRows(t *testing.T) {
+func TestMinReportCountSuppressesThinRows(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 
@@ -173,7 +173,7 @@ func TestMinReportedSessionsSuppressesThinRows(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(signals) != 0 {
-		t.Fatalf("expected a single-session row to be suppressed at min 5, got %+v", signals)
+		t.Fatalf("expected a single-report row to be suppressed at min 5, got %+v", signals)
 	}
 }
 
@@ -215,7 +215,7 @@ func TestRollupPreservesCountsAndDropsRawRows(t *testing.T) {
 	}
 	// The aggregate a caller sees must be identical across a rollup - that
 	// is the property that makes retention safe to run unattended.
-	if len(after) != 1 || after[0].ReportedSessions != before[0].ReportedSessions {
+	if len(after) != 1 || after[0].ReportCount != before[0].ReportCount {
 		t.Fatalf("rollup changed the visible signal: %+v vs %+v", before, after)
 	}
 	if after[0].DefectRate != before[0].DefectRate {
@@ -258,7 +258,7 @@ func TestRollupIsCumulativeAcrossRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(signals) != 1 || signals[0].ReportedSessions != 2 {
+	if len(signals) != 1 || signals[0].ReportCount != 2 {
 		t.Fatalf("expected a second rollup to add to the first, got %+v", signals)
 	}
 }

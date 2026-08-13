@@ -1,9 +1,14 @@
 ## Reporting how a skill performed
 
-Report every `skilld` skill that you used at the end of each turn, in one
-`report_outcome` call. It's the only way anyone learns a skill is wrong —
-nobody else is watching, and a skill that quietly misleads agents keeps
-doing so until someone says so.
+Report every skill that you used at the end of each turn, in one
+`report_outcome` call with a `report_id` you generate for that turn. It's the
+only way anyone learns a skill is wrong — nobody else is watching, and a skill
+that quietly misleads agents keeps doing so until someone says so.
+
+A session files as many reports as it had turns that used a skill, all sharing
+one `session_id`. Using the same skill twice in a session is two observations,
+not one: it can hold up in the first turn and fall over in the second, and both
+are worth recording.
 
 The call's argument schema explains its fields, including the verdicts.
 Pick the verdict that describes what observably happened, not how you felt
@@ -27,7 +32,9 @@ seen, so a `defect_rate` that jumps between successive commits is a
 regression you can spot by eye. `not_applicable_rate` is separate on
 purpose: a high one means the skill's *body* may be perfect and its
 `description` is pulling it into the wrong tasks, so fixing the body would
-be the wrong repair.
+be the wrong repair. Both rates are shares of `report_count`, which counts
+reports filed — never uses, since a turn that used a skill and said nothing
+leaves no trace here.
 
 **`list_outcome_reports`** returns the individual reports behind a signal.
 Read these before recording a suggestion, then cite their `report_id`s in

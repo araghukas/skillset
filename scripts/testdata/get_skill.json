@@ -1,0 +1,21 @@
+{
+  "session_id": "@@SESSION@@",
+  "transcript_path": "/tmp/transcript.jsonl",
+  "cwd": "/work",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "mcp__skillsd__get_skill",
+  "tool_input": {
+    "skill_name": "@@SKILL@@",
+    "include_context_files": true
+  },
+  "tool_response": {
+    "structuredContent": {
+      "skill": {
+        "name": "@@SKILL@@",
+        "description": "an example skill",
+        "commit": "@@COMMIT@@",
+        "context_files": []
+      }
+    }
+  }
+}

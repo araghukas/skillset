@@ -45,8 +45,8 @@ type listOutcomeReportsOutput struct {
 
 type listSkillSignalsOutput struct {
 	Signals []struct {
-		SkillCommit      string `json:"skill_commit"`
-		ReportedSessions int64  `json:"reported_sessions"`
+		SkillCommit string `json:"skill_commit"`
+		ReportCount int64  `json:"report_count"`
 	} `json:"signals"`
 }
 
@@ -152,8 +152,8 @@ func TestReportOutcomeRoundTrip(t *testing.T) {
 		for _, s := range out.Signals {
 			if s.SkillCommit == commit {
 				found = true
-				if s.ReportedSessions < 1 {
-					t.Errorf("signal for %s@%s has ReportedSessions=%d, want >= 1", skillName(), commit, s.ReportedSessions)
+				if s.ReportCount < 1 {
+					t.Errorf("signal for %s@%s has ReportCount=%d, want >= 1", skillName(), commit, s.ReportCount)
 				}
 			}
 		}

@@ -1,5 +1,5 @@
 // Package evidencetools registers skillsd-registry's evidence MCP tools:
-// reporting how a skill fared in a session, and reading the aggregated
+// reporting how a skill fared in a turn, and reading the aggregated
 // signal back.
 //
 // Add is called only when evidence collection is enabled, so these tools
@@ -47,9 +47,10 @@ type Deps struct {
 func Add(srv *mcp.Server, deps Deps) {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: "report_outcome",
-		Description: "Report how one or more skills fared in a session you just completed. " +
-			"Report every skill you used, including the ones that worked - omitting those " +
-			"inflates every defect rate this server computes. Safe to retry with the same " +
+		Description: "Report how one or more skills fared in the turn you are finishing. " +
+			"Report every skill you used in it, including the ones that worked - omitting " +
+			"those inflates every defect rate this server computes. Call this once per turn " +
+			"that used a skill, not once per session. Safe to retry with the same " +
 			"report_id: a repeat is accepted and changes nothing.",
 		Annotations: writeTool(idempotent()),
 		InputSchema: withVerdictEnum[ReportOutcomeInput]("skills"),
@@ -57,11 +58,11 @@ func Add(srv *mcp.Server, deps Deps) {
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: "list_skill_signals",
-		Description: "Read the aggregated outcome signal for skills: how many sessions " +
-			"reported using each (skill, commit) pair, and how they turned out. This is the " +
-			"\"what should I fix next\" query. reported_sessions counts only sessions that " +
-			"reported - a session that crashed never reports - so treat every rate here as " +
-			"\"among sessions that reported\", not \"among sessions\".",
+		Description: "Read the aggregated outcome signal for skills: how many reports name " +
+			"each (skill, commit) pair, and how they turned out. This is the \"what should " +
+			"I fix next\" query. report_count counts reports that were filed - a turn that " +
+			"used a skill and never reported is invisible here - so treat every rate as " +
+			"\"among reports filed\", not \"among uses\".",
 		Annotations: readOnly(),
 	}, listSkillSignals(deps))
 
@@ -147,7 +148,7 @@ func writeTool(opts ...annotationOpt) *mcp.ToolAnnotations {
 	return a
 }
 
-// SkillOutcomeInput is how one skill fared within the reported session.
+// SkillOutcomeInput is how one skill fared within the reported turn.
 type SkillOutcomeInput struct {
 	SkillName string `json:"skill_name" jsonschema:"the skill's name, as returned by get_skill"`
 
@@ -162,16 +163,17 @@ type SkillOutcomeInput struct {
 	Note string `json:"note,omitempty" jsonschema:"what specifically went wrong - the command that failed, the instruction that was wrong. A reviewer reads this, so be concrete. Ignored for the applied verdict"`
 }
 
-// ReportOutcomeInput is one session's outcome for every skill it used.
+// ReportOutcomeInput is one turn's outcome for every skill it used.
 type ReportOutcomeInput struct {
-	// ReportID makes the call idempotent: generate a UUID once, before the
-	// first attempt, and reuse it on every retry.
-	ReportID string `json:"report_id" jsonschema:"a UUID you generate once, before the first attempt; reuse it on every retry so a retry does not double-count"`
+	// ReportID makes the call idempotent, and it is per turn rather than
+	// per session: a fresh UUID for each turn's report, reused only across
+	// retries of that same report.
+	ReportID string `json:"report_id" jsonschema:"a UUID you generate once per turn, before the first attempt; reuse it only when retrying that same turn's report, so a retry does not double-count"`
 
 	AgentID   string `json:"agent_id" jsonschema:"the value of $SKILLSET_AGENT_ID in your env; your unique identifier as an agent"`
-	SessionID string `json:"session_id" jsonschema:"identifies your session; one report per session"`
+	SessionID string `json:"session_id" jsonschema:"identifies the session this turn belongs to; the same value across every report you file in one session"`
 
-	Skills []SkillOutcomeInput `json:"skills" jsonschema:"every skill this session used, including the ones that worked"`
+	Skills []SkillOutcomeInput `json:"skills" jsonschema:"every skill this turn used, including the ones that worked"`
 }
 
 // ReportOutcomeOutput reports whether the call recorded anything new.
@@ -229,12 +231,12 @@ func reportOutcome(deps Deps) mcp.ToolHandlerFor[ReportOutcomeInput, ReportOutco
 type ListSkillSignalsInput struct {
 	SkillName string `json:"skill_name,omitempty" jsonschema:"only signals for this skill; omit for all skills"`
 
-	// MinReportedSessions suppresses rows built on too little data to read
+	// MinReportCount suppresses rows built on too little data to read
 	// anything into.
-	MinReportedSessions int `json:"min_reported_sessions,omitempty" jsonschema:"suppress rows with fewer than this many reported sessions; omit for 1"`
+	MinReportCount int `json:"min_report_count,omitempty" jsonschema:"suppress rows built on fewer than this many reports; omit for 1"`
 }
 
-// VerdictCountOutput is how many reported sessions landed on one verdict.
+// VerdictCountOutput is how many reports landed on one verdict.
 type VerdictCountOutput struct {
 	Verdict string `json:"verdict"`
 	Count   int64  `json:"count"`
@@ -245,16 +247,16 @@ type SkillSignalOutput struct {
 	SkillName   string `json:"skill_name"`
 	SkillCommit string `json:"skill_commit"`
 
-	// ReportedSessions is the number of distinct sessions that reported
-	// using this skill at this commit - not the number that used it.
-	// Reporting is voluntary, so every rate below is "among sessions that
-	// reported", never "among sessions".
-	ReportedSessions int64 `json:"reported_sessions"`
+	// ReportCount is how many reports named this skill at this commit - not
+	// how many sessions, agents, or uses. Reports are per turn and
+	// reporting is voluntary, so every rate below is "among reports filed",
+	// never "among uses".
+	ReportCount int64 `json:"report_count"`
 
 	VerdictCounts []VerdictCountOutput `json:"verdict_counts"`
 
-	// DefectRate is the share of reported sessions with a verdict implying
-	// the skill's content is wrong, stale, or incomplete.
+	// DefectRate is the share of reports with a verdict implying the
+	// skill's content is wrong, stale, or incomplete.
 	DefectRate float64 `json:"defect_rate"`
 
 	// NotApplicableRate is tracked separately from DefectRate because it
@@ -275,7 +277,7 @@ type ListSkillSignalsOutput struct {
 
 func listSkillSignals(deps Deps) mcp.ToolHandlerFor[ListSkillSignalsInput, ListSkillSignalsOutput] {
 	return func(ctx context.Context, _ *mcp.CallToolRequest, in ListSkillSignalsInput) (*mcp.CallToolResult, ListSkillSignalsOutput, error) {
-		min := in.MinReportedSessions
+		min := in.MinReportCount
 		if min <= 0 {
 			min = 1
 		}
@@ -297,7 +299,7 @@ func listSkillSignals(deps Deps) mcp.ToolHandlerFor[ListSkillSignalsInput, ListS
 			out.Signals = append(out.Signals, SkillSignalOutput{
 				SkillName:         sig.SkillName,
 				SkillCommit:       sig.SkillCommit,
-				ReportedSessions:  sig.ReportedSessions,
+				ReportCount:       sig.ReportCount,
 				VerdictCounts:     counts,
 				DefectRate:        sig.DefectRate,
 				NotApplicableRate: sig.NotApplicableRate,
@@ -318,7 +320,7 @@ type ListOutcomeReportsInput struct {
 	Limit             int    `json:"limit,omitempty" jsonschema:"maximum reports to return, 1-500; omit for 100"`
 }
 
-// OutcomeReportOutput is one stored (session, skill) observation.
+// OutcomeReportOutput is one stored (report, skill) observation.
 type OutcomeReportOutput struct {
 	ReportID    string    `json:"report_id"`
 	AgentID     string    `json:"agent_id"`
