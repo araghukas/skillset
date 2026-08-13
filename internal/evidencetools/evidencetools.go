@@ -149,7 +149,7 @@ func writeTool(opts ...annotationOpt) *mcp.ToolAnnotations {
 
 // SkillOutcomeInput is how one skill fared within the reported session.
 type SkillOutcomeInput struct {
-	SkillName string `json:"skill_name"`
+	SkillName string `json:"skill_name" jsonschema:"the skill's name, as returned by get_skill"`
 
 	// SkillCommit is required so an outcome can be attributed to a
 	// specific version - a report that doesn't say which version it is
@@ -168,7 +168,7 @@ type ReportOutcomeInput struct {
 	// first attempt, and reuse it on every retry.
 	ReportID string `json:"report_id" jsonschema:"a UUID you generate once, before the first attempt; reuse it on every retry so a retry does not double-count"`
 
-	AgentID   string `json:"agent_id"`
+	AgentID   string `json:"agent_id" jsonschema:"the value of $SKILLSET_AGENT_ID in your env; your unique identifier as an agent"`
 	SessionID string `json:"session_id" jsonschema:"identifies your session; one report per session"`
 
 	Skills []SkillOutcomeInput `json:"skills" jsonschema:"every skill this session used, including the ones that worked"`
@@ -311,7 +311,7 @@ func listSkillSignals(deps Deps) mcp.ToolHandlerFor[ListSkillSignalsInput, ListS
 
 // ListOutcomeReportsInput filters the report listing.
 type ListOutcomeReportsInput struct {
-	SkillName         string `json:"skill_name"`
+	SkillName         string `json:"skill_name" jsonschema:"name of the skill to list reports for"`
 	SkillCommit       string `json:"skill_commit,omitempty" jsonschema:"only reports for this commit; omit for all commits"`
 	Verdict           string `json:"verdict,omitempty" jsonschema:"only reports with this verdict: applied, applied_with_correction, contradicted, incomplete, not_applicable; omit for all verdicts"`
 	ExcludeEmptyNotes bool   `json:"exclude_empty_notes,omitempty" jsonschema:"skip reports with no note - usually the applied ones"`

@@ -61,7 +61,7 @@ type Suggestion struct {
 	// Branch is the full branch name: suggestions/<agent>/<skill>/<id>.
 	Branch string `json:"branch"`
 
-	SkillName string `json:"skill_name"`
+	SkillName string `json:"skill_name" jsonschema:"the skill this suggestion is for"`
 	AgentID   string `json:"agent_id"`
 
 	// BaseSHA is the base branch commit this suggestion forked from.
