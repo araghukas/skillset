@@ -64,6 +64,37 @@ correct content, cited evidence, honest commit message. Report the branch
 name to whoever asked if useful, and say plainly it's an internal tracking
 name, not a pull request and not something anyone can check out.
 
+### Sending your change as a patch
+
+Describe the change in `patch`, a unified diff. `files`, which carries whole
+file contents, is for new files — they have nothing to diff against — and for
+creating a skill; send one or the other, never both. Regenerating a long file
+to change two lines is slow and invites you to corrupt the parts you weren't
+editing.
+
+1. Read the current content with **`get_skill_at_ref`** and write it to a
+   scratch file. Don't diff against `get_skill`'s copy: skillsd appends an
+   "Improving this skill" footer to every `SKILL.md` it serves, and that footer
+   is not in the repository, so any hunk near the end of the file will fail to
+   apply.
+2. Copy it, edit the copy.
+3. `git diff --no-index orig new`, or `diff -u orig new`, or write the diff
+   yourself. Send the output as `patch`.
+
+- Paths may be relative to the skill directory or name your scratch files;
+  `a/` and `b/` prefixes are fine. A **new** file needs its exact path relative
+  to the skill directory, since there's nothing to match it against.
+- Context and removed lines must match exactly, but the line numbers may be
+  off — a hunk is found by its surroundings.
+- Renames, mode changes, and binary files aren't supported. Express a rename as
+  a deletion plus a creation.
+- **When revising your own suggestion, the patch applies to your branch, not to
+  the base skill.** Re-read it with `get_skill_at_ref({skill_name, ref: <your
+  branch>})` first.
+- If a patch is rejected, the error says which hunk failed and what the file
+  says there instead. Fix the patch or send `files` — don't guess at new
+  context lines.
+
 ### If another agent already suggested your exact fix
 
 When your change would produce content identical (whitespace aside) to an

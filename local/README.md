@@ -200,30 +200,44 @@ An unknown `skill_name` comes back as a tool error (`"isError": true` in the
 result), not a protocol-level failure — the call still succeeds at the
 JSON-RPC level.
 
-`record_suggestion` against `skillsd-registry` — full new file content, not a
-patch; the server computes the diff:
+`record_suggestion` against `skillsd-registry` — the change goes in `patch` as
+a unified diff. Read the file you're editing first, since the patch's context
+lines have to match what the registry has:
 
 ```bash
 curl -s -X POST http://localhost:8081/mcp \
   -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
   -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{
+    "name": "get_skill_at_ref",
+    "arguments": {"skill_name": "internal-comms", "include_context_files": true}
+  }}'
+```
+
+Then quote the lines you're changing back in the hunk — the `description:` line
+below is a placeholder for whatever the call above actually returned:
+
+```bash
+curl -s -X POST http://localhost:8081/mcp \
+  -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{
     "name": "record_suggestion",
     "arguments": {
       "skill_name": "internal-comms",
       "agent_id": "agent-1",
       "suggestion_id": "fix-typo",
       "commit_message": "fix typo in description",
-      "files": [{"file_path": "SKILL.md", "content": "---\nname: internal-comms\ndescription: fixed description\n---\nbody\n"}]
+      "patch": "--- a/SKILL.md\n+++ b/SKILL.md\n@@ -2,2 +2,2 @@\n name: internal-comms\n-description: the description as it is today\n+description: the description with the typo fixed\n"
     }
   }}'
 ```
 
-(Re-running this exact call fails with `cannot create empty commit: clean
-working tree` once the branch already has this content committed - expected,
-not a bug.)
+A patch that doesn't apply comes back as a tool error naming the hunk and what
+the file says there instead — including on a re-run, once the branch already
+carries the change, which the error points out. Use `files` with whole file
+contents only for a file that doesn't exist yet.
 
 Every other tool follows the same `tools/call` shape with its own
-`name`/`arguments` — `get_suggestion`, `get_skill_at_ref`, `list_suggestions`,
+`name`/`arguments` — `get_suggestion`, `list_suggestions`,
 `list_suggestion_clusters`, and (if evidence collection is enabled)
 `report_outcome`, `list_outcome_reports`, `list_skill_signals`. Call
 `get_client_guide` on either server for the full workflow each tool expects —

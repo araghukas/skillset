@@ -124,6 +124,62 @@ func TestFullSuggestionLifecycle(t *testing.T) {
 		}
 	})
 
+	// A patch applies to the tip of the agent's own branch, so this revises
+	// what the record_suggestion subtest above left there.
+	patchMarker := fmt.Sprintf("Appended by the patch subtest at %s.", time.Now().UTC().Format(time.RFC3339))
+	t.Run("record_suggestion_with_patch", func(t *testing.T) {
+		res := callTool(t, session, "record_suggestion", map[string]any{
+			"skill_name":     skillName(),
+			"agent_id":       agentID,
+			"suggestion_id":  suggestionID,
+			"commit_message": "verify: patch " + skillName(),
+			"patch": "--- a/SKILL.md\n+++ b/SKILL.md\n@@ -8,1 +8,2 @@\n" +
+				" This is seed content for local dev only - edited by the verification test.\n" +
+				"+" + patchMarker + "\n",
+		})
+		if res.IsError {
+			t.Fatalf("record_suggestion with a patch failed: %s", contentText(res))
+		}
+		var out recordSuggestionOutput
+		decodeStructured(t, res, &out)
+		if out.Suggestion.Branch != branch {
+			t.Errorf("suggestion branch = %q, want %q", out.Suggestion.Branch, branch)
+		}
+		if len(out.Suggestion.Commits) < 2 {
+			t.Errorf("got %d commits, want the patch to have appended one", len(out.Suggestion.Commits))
+		}
+
+		read := callTool(t, session, "get_skill_at_ref", map[string]any{
+			"skill_name":            skillName(),
+			"ref":                   branch,
+			"include_context_files": true,
+		})
+		if read.IsError {
+			t.Fatalf("get_skill_at_ref failed: %s", contentText(read))
+		}
+		if !strings.Contains(contentText(read), patchMarker) {
+			t.Error("the patched line is not in the skill at the suggestion ref")
+		}
+	})
+
+	t.Run("record_suggestion_rejects_a_stale_patch", func(t *testing.T) {
+		res := callTool(t, session, "record_suggestion", map[string]any{
+			"skill_name":    skillName(),
+			"agent_id":      agentID,
+			"suggestion_id": suggestionID,
+			"patch": "--- a/SKILL.md\n+++ b/SKILL.md\n@@ -8,1 +8,2 @@\n" +
+				" a line this skill has never contained\n+another one\n",
+		})
+		if !res.IsError {
+			t.Fatal("a patch that does not apply should come back as a tool error")
+		}
+		for _, want := range []string{"SKILL.md", "hunk #1", "get_skill_at_ref"} {
+			if !strings.Contains(contentText(res), want) {
+				t.Errorf("rejection is missing %q: %s", want, contentText(res))
+			}
+		}
+	})
+
 	t.Run("list_suggestions", func(t *testing.T) {
 		res := callTool(t, session, "list_suggestions", map[string]any{"skill_name": skillName()})
 		if res.IsError {

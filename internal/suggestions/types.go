@@ -4,12 +4,12 @@ import "time"
 
 // FileEdit is one file's full new content within a suggestion.
 //
-// Suggestions carry complete file contents rather than patches: the server
-// computes the diff itself, so callers never need to worry about patch
-// context lines or applying a patch against a base they may not have in
-// sync. It converts to a gitrepo.FileChange on the way to a commit; the two
-// are deliberately separate types because this one is agent-supplied and
-// relative to the skill directory, while gitrepo's is repo-relative.
+// Complete file contents are the form a suggestion is recorded in: a patch
+// supplied instead is expanded into these before anything else runs, so
+// deduplication, the commit, and clustering all see one kind of request. It
+// converts to a gitrepo.FileChange on the way to a commit; the two are
+// deliberately separate types because this one is agent-supplied and relative
+// to the skill directory, while gitrepo's is repo-relative.
 type FileEdit struct {
 	// FilePath is relative to the skill directory, e.g. "scripts/run.sh".
 	FilePath string `json:"file_path"`
@@ -140,7 +140,15 @@ type SuggestInput struct {
 	SkillName    string
 	AgentID      string
 	SuggestionID string
-	Files        []FileEdit
+
+	// Patch is a unified diff of the change, expanded into Files against the
+	// suggestion branch's tip - or the base branch, for a suggestion that
+	// doesn't exist yet. Exactly one of Patch and Files must be set.
+	Patch string
+
+	// Files carries whole files, each with its full content: what a new file
+	// or a new skill is sent as, having nothing to diff against.
+	Files []FileEdit
 
 	// CommitMessage is defaulted from the skill name when empty.
 	CommitMessage string

@@ -54,8 +54,9 @@ type Deps struct {
 func Add(srv *mcp.Server, deps Deps) {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: "record_suggestion",
-		Description: "Record a suggested edit to a skill. Send the full new content of each " +
-			"changed file, not a patch - the server computes the diff. The change is recorded " +
+		Description: "Record a suggested edit to a skill. Send the change as a unified diff in " +
+			"patch; files, carrying whole file contents, is for new files that have nothing to " +
+			"diff against. The change is recorded " +
 			"as a commit inside the registry's own internal git store, purely for tracking and " +
 			"corroboration; you have no git access to it and nothing is pushed anywhere until " +
 			"the registry opens a pull request on its own. If another agent's open suggestion " +
@@ -131,7 +132,8 @@ type RecordSuggestionInput struct {
 	SkillName           string          `json:"skill_name" jsonschema:"skill to edit, as returned by list_skills"`
 	AgentID             string          `json:"agent_id" jsonschema:"stable identifier for you, the calling agent; must not contain \"/\""`
 	SuggestionID        string          `json:"suggestion_id" jsonschema:"short slug naming this line of work, unique per agent and skill, e.g. \"fix-stale-docker-flag\"; must not contain \"/\". Reuse it to add commits to the same suggestion"`
-	Files               []FileEditInput `json:"files" jsonschema:"the changed files, each with its full new content"`
+	Patch               string          `json:"patch,omitempty" jsonschema:"a unified diff of your change - how to send an edit to a file that already exists. Write the current file to a scratch path, edit a copy, and diff the two with \"git diff --no-index\" or \"diff -u\". Read the current content from get_skill_at_ref (not get_skill, whose SKILL.md carries a footer the registry does not store), and when revising your own suggestion, read it at your suggestion branch - that is what the patch applies to. Renames, mode changes and binary files are not supported"`
+	Files               []FileEditInput `json:"files,omitempty" jsonschema:"whole files, each with its full content - for new files, which have nothing to diff against, and for creating a skill. Mutually exclusive with patch, so an edit to an existing file goes in patch instead"`
 	CommitMessage       string          `json:"commit_message,omitempty" jsonschema:"commit subject; defaulted from the skill name when omitted"`
 	SourceThreadURI     string          `json:"source_thread_uri,omitempty" jsonschema:"pointer to the conversation that produced this change, if you have one"`
 	MotivatingReportIDs []string        `json:"motivating_report_ids,omitempty" jsonschema:"report IDs from list_outcome_reports that justify this change; they reach the pull request so a reviewer sees the evidence"`
@@ -161,6 +163,7 @@ func recordSuggestion(deps Deps) mcp.ToolHandlerFor[RecordSuggestionInput, Recor
 			AgentID:             in.AgentID,
 			SuggestionID:        in.SuggestionID,
 			Files:               files,
+			Patch:               in.Patch,
 			CommitMessage:       in.CommitMessage,
 			SourceThreadURI:     in.SourceThreadURI,
 			MotivatingReportIDs: in.MotivatingReportIDs,

@@ -161,3 +161,18 @@ func TestJoinContextFilesSkipsMissing(t *testing.T) {
 		t.Errorf("joinContextFiles with a missing path should equal the existing file alone")
 	}
 }
+
+// TestGuideExplainsHowToProduceAPatch pins the parts of the patch recipe an
+// agent cannot work out on its own: the tool that returns diffable content,
+// and the footer that makes the obvious alternative fail.
+func TestGuideExplainsHowToProduceAPatch(t *testing.T) {
+	full, err := guideText("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, phrase := range []string{"patch", "--no-index", "diff -u", "get_skill_at_ref", "Improving this skill"} {
+		if !strings.Contains(full, phrase) {
+			t.Errorf("full guide never mentions %q", phrase)
+		}
+	}
+}

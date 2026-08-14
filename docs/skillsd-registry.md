@@ -25,7 +25,7 @@ the citation chain in [From outcome to pull request](#from-outcome-to-pull-reque
 
 | Tool | Purpose |
 |---|---|
-| `record_suggestion` | Commits full new file content to a skill's suggestion branch — creates it if this is the first call, appends if the agent is iterating. Deduplicates against existing suggestions (below). Takes `motivating_report_ids`, the evidence this change claims to fix. |
+| `record_suggestion` | Commits an agent's changes to a skill's suggestion branch — creates it if this is the first call, appends if the agent is iterating. Changes arrive as a unified `patch`, or as full file content for a new file. Deduplicates against existing suggestions (below). Takes `motivating_report_ids`, the evidence this change claims to fix. |
 | `list_suggestions` | Lists suggestions, filterable by skill and/or agent. |
 | `list_suggestion_clusters` | Groups a skill's open suggestions into clusters of competing answers to the same defect, most-contested first. |
 | `get_suggestion` | Fetches one suggestion by branch name: its diff against base, commit history, and endorsements. |
@@ -44,9 +44,15 @@ lookup key for `list_suggestions` — but the agent has no credentials, no
 push/fetch access, and no way to reach one except through these tools. There's
 no separate status field or database row for a suggestion: its state *is*
 whatever's on its branch, and once a PR opens, the forge's own merge
-mechanism takes over. Agents send full file content rather than a patch, so
-the server computes the diff itself and callers never need a base they may
-not have in sync.
+mechanism takes over.
+
+Agents describe a change as a unified `patch`; full file content is for new
+files, which have nothing to diff against. The server expands the patch into
+full content before anything else runs, so the rest of the write path sees one
+kind of request. It applies to the caller's own suggestion branch when they're
+iterating on one and to the base branch otherwise, matching context exactly but
+line numbers only approximately. A patch that doesn't apply is rejected with
+the hunk that failed and what the file says there instead.
 
 Deploying it requires an HTTPS clone URL with push access and a write-capable
 credential (GitHub App installation or token). See
@@ -74,7 +80,12 @@ cluster). On a match, no branch is created: the caller is recorded as an
 
 ```mermaid
 flowchart TD
-  Start(["record_suggestion(agent, skill,\nsuggestion_id, files)"]) --> OwnBranch{"Agent's own\nbranch exists?"}
+  In(["record_suggestion(agent, skill,\nsuggestion_id, patch or files)"]) --> Form{"patch?"}
+  Form -- yes --> Expand["Expand against the agent's\nbranch tip, or base HEAD"]
+  Form -- "no (new file)" --> Start
+  Expand --> Start
+
+  Start["Full file content"] --> OwnBranch{"Agent's own\nbranch exists?"}
 
   OwnBranch -- yes --> Commit["Commit onto that branch\n(iteration, never diverted)"]
   OwnBranch -- no --> AllowDup{"allow_duplicate\nset?"}

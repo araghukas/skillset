@@ -530,3 +530,81 @@ func TestToolAnnotationsMatchTheirGuarantees(t *testing.T) {
 		}
 	}
 }
+
+// TestRecordSuggestionAcceptsPatch confirms a unified diff survives the
+// protocol boundary and lands as an ordinary suggestion.
+func TestRecordSuggestionAcceptsPatch(t *testing.T) {
+	rig := newTestRig(t, false, 0)
+	cs := connect(t, rig.deps)
+
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "record_suggestion",
+		Arguments: map[string]any{
+			"skill_name":    "frontend-design",
+			"agent_id":      "agent-1",
+			"suggestion_id": "fix-description",
+			"patch": `--- a/SKILL.md
++++ b/SKILL.md
+@@ -1,5 +1,5 @@
+ ---
+ name: frontend-design
+-description: designs frontends
++description: designs frontends, correctly
+ ---
+ body
+`,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var recorded RecordSuggestionOutput
+	decodeStructured(t, res, &recorded)
+	if recorded.Suggestion.Branch != "suggestions/agent-1/frontend-design/fix-description" {
+		t.Fatalf("unexpected branch %q", recorded.Suggestion.Branch)
+	}
+	if !strings.Contains(recorded.Suggestion.Diff, "+description: designs frontends, correctly") {
+		t.Errorf("diff does not carry the patched line:\n%s", recorded.Suggestion.Diff)
+	}
+}
+
+// TestRecordSuggestionPatchErrorReachesAgent: a rejected patch is only useful
+// if the reason survives to the caller, so assert what the agent actually
+// reads back.
+func TestRecordSuggestionPatchErrorReachesAgent(t *testing.T) {
+	rig := newTestRig(t, false, 0)
+	cs := connect(t, rig.deps)
+
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "record_suggestion",
+		Arguments: map[string]any{
+			"skill_name":    "frontend-design",
+			"agent_id":      "agent-1",
+			"suggestion_id": "stale",
+			"patch": `--- a/SKILL.md
++++ b/SKILL.md
+@@ -1,5 +1,5 @@
+ ---
+ name: frontend-design
+-description: something the skill never said
++description: designs frontends, correctly
+ ---
+ body
+`,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.IsError {
+		t.Fatal("expected an error result for a patch that does not apply")
+	}
+
+	text := contentText(t, res)
+	for _, want := range []string{"SKILL.md", "hunk #1", "but found", "get_skill_at_ref"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("error text is missing %q:\n%s", want, text)
+		}
+	}
+}

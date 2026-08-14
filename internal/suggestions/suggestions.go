@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -58,6 +59,12 @@ func New(repo *gitrepo.Repo, subPath string, maxFileBytes int) *Service {
 // branch, creating it (forked from the current base branch HEAD) if it
 // doesn't already exist, or appending a commit to it otherwise.
 //
+// The change arrives as a unified diff, which is expanded into full file
+// contents before anything else happens - so a caller who only knows what
+// changed never has to restate a file they didn't write, and everything below
+// this point sees one kind of request. Whole file contents are sent directly
+// only for a file that doesn't exist yet.
+//
 // Before creating a new branch, it checks whether another agent's open
 // suggestion for this skill already produces identical content. If one
 // does, no branch is created: the caller is recorded as an endorser of that
@@ -97,10 +104,53 @@ func (s *Service) RecordSuggestion(ctx context.Context, req SuggestInput) (*Sugg
 			return nil, fmt.Errorf("suggestions: %s %q must not contain %q", label, v, "/")
 		}
 	}
-	if len(req.Files) == 0 {
-		return nil, fmt.Errorf("suggestions: at least one file change is required")
+	switch {
+	case len(req.Files) == 0 && req.Patch == "":
+		return nil, fmt.Errorf("suggestions: a change is required: send patch with a unified diff, or files with whole file contents when the file is new")
+	case len(req.Files) > 0 && req.Patch != "":
+		return nil, fmt.Errorf("suggestions: send either files or patch, not both")
+	case len(req.Patch) > s.maxFileBytes:
+		return nil, fmt.Errorf("suggestions: patch is %d bytes, exceeding the %d byte limit", len(req.Patch), s.maxFileBytes)
 	}
-	for _, fc := range req.Files {
+
+	branch := branchName(req.AgentID, req.SkillName, req.SuggestionID)
+
+	base, err := s.repo.BaseHead()
+	if err != nil {
+		return nil, fmt.Errorf("suggestions: resolving base branch: %w", err)
+	}
+
+	tip, branchErr := s.repo.ResolveRef(branch)
+	isNewBranch := branchErr != nil
+
+	// A patch is expanded into full file contents here, above everything that
+	// acts on a suggestion, so nothing below has to know which form the caller
+	// sent. It applies to the caller's own branch tip when they're iterating -
+	// the content their last call left - and to the base branch otherwise,
+	// which is also the tree the duplicate check reads.
+	if req.Patch != "" {
+		at := tip
+		if isNewBranch {
+			at = base
+		}
+		expanded, err := s.expandPatch(ctx, req, branch, at, !isNewBranch)
+		if err != nil {
+			return nil, err
+		}
+		req.Files, req.Patch = expanded, ""
+	}
+
+	// Copied because the paths below are rewritten to their cleaned form, and
+	// the caller's slice is theirs.
+	req.Files = slices.Clone(req.Files)
+
+	for i, fc := range req.Files {
+		clean, err := cleanSkillRelPath(fc.FilePath)
+		if err != nil {
+			return nil, err
+		}
+		req.Files[i].FilePath = clean
+
 		if fc.Deleted {
 			continue
 		}
@@ -111,16 +161,6 @@ func (s *Service) RecordSuggestion(ctx context.Context, req SuggestInput) (*Sugg
 			return nil, fmt.Errorf("suggestions: file %q is %d bytes, exceeding the %d byte limit", fc.FilePath, len(fc.Content), s.maxFileBytes)
 		}
 	}
-
-	branch := branchName(req.AgentID, req.SkillName, req.SuggestionID)
-
-	base, err := s.repo.BaseHead()
-	if err != nil {
-		return nil, fmt.Errorf("suggestions: resolving base branch: %w", err)
-	}
-
-	_, branchErr := s.repo.ResolveRef(branch)
-	isNewBranch := branchErr != nil
 
 	if isNewBranch && !req.AllowDuplicate {
 		dup, err := s.duplicateOf(ctx, req, base)
@@ -375,6 +415,41 @@ func (s *Service) Push(ctx context.Context, branch string) error {
 		return err
 	}
 	return s.repo.Push(ctx, branch, refs...)
+}
+
+// cleanSkillRelPath returns p in the canonical form a file within a skill
+// directory takes, and rejects anything that would resolve outside it.
+//
+// Every edit's path is joined onto the skill's directory before it is
+// committed, so without this a caller could name another skill's files, or the
+// repository's own configuration, and have the result staged on their branch.
+func cleanSkillRelPath(p string) (string, error) {
+	reject := func(why string) error {
+		return fmt.Errorf("suggestions: file path %q %s; paths are relative to the skill directory, e.g. \"SKILL.md\" or \"scripts/run.sh\"", p, why)
+	}
+
+	switch {
+	case p == "":
+		return "", reject("is empty")
+	case strings.ContainsRune(p, 0):
+		return "", reject("contains a null byte")
+	case path.IsAbs(p):
+		return "", reject("is absolute")
+	}
+
+	clean := path.Clean(p)
+	for _, part := range strings.Split(clean, "/") {
+		switch part {
+		case "..":
+			return "", reject("escapes the skill directory")
+		case ".git":
+			return "", reject("is inside a git directory")
+		}
+	}
+	if clean == "." {
+		return "", reject("names no file")
+	}
+	return clean, nil
 }
 
 func (s *Service) skillAt(ctx context.Context, skillName string, hash plumbing.Hash) (*skill.Metadata, error) {

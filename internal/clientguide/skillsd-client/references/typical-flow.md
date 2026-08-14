@@ -18,8 +18,9 @@
    actually went wrong, and collect the `report_id`s.
 3. `list_suggestion_clusters({skill_name})` → is someone already fixing this?
    If so, read their suggestion before writing your own.
-4. `record_suggestion` with the full new content of every file you're touching,
-   and `motivating_report_ids` from step 2.
+4. `record_suggestion` with your change as a unified `patch` (whole file
+   contents in `files` only for a new file), and `motivating_report_ids` from
+   step 2. See the registry reference for how to produce the patch.
    - If the response comes back `deduplicated: true`, you're done — an
      identical suggestion existed and you've now corroborated it. Report that
      rather than trying again.
