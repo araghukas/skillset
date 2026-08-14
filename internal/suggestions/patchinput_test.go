@@ -191,13 +191,14 @@ func TestPatchCreatesAFile(t *testing.T) {
 	}
 }
 
-// TestPatchAcceptsScratchPaths covers the recipe callers are given: two copies
-// of the file somewhere else on disk, diffed against each other.
-func TestPatchAcceptsScratchPaths(t *testing.T) {
+// TestPatchAcceptsMirroredScratchDirs covers the recipe callers are given:
+// the skill mirrored under scratch roots named a and b, diffed from their
+// parent. The tab-separated timestamps are what "diff -ru" emits.
+func TestPatchAcceptsMirroredScratchDirs(t *testing.T) {
 	svc := newSeededService(t)
 
-	if _, err := suggestPatch(t, svc, "agent-1", "fix-description", `--- a/scratch/orig/SKILL.md	2026-08-13 10:00:00
-+++ b/scratch/edited/SKILL.md	2026-08-13 10:01:00
+	if _, err := suggestPatch(t, svc, "agent-1", "fix-description", `--- a/SKILL.md	2026-08-13 10:00:00
++++ b/SKILL.md	2026-08-13 10:01:00
 @@ -1,5 +1,5 @@
  ---
  name: frontend-design
@@ -207,6 +208,73 @@ func TestPatchAcceptsScratchPaths(t *testing.T) {
  body
 `); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestPatchRejectsUnresolvablePath pins the decision to reject rather than
+// guess: two differently-named scratch copies name no file of the skill, and
+// inferring one from the filename could land the edit on a same-named file.
+// The error has to carry both what the skill does have and how to diff it.
+func TestPatchRejectsUnresolvablePath(t *testing.T) {
+	svc := newSeededService(t)
+
+	_, err := suggestPatch(t, svc, "agent-1", "fix-description", `--- a/scratch/orig/SKILL.md	2026-08-13 10:00:00
++++ b/scratch/edited/SKILL.md	2026-08-13 10:01:00
+@@ -1,5 +1,5 @@
+ ---
+ name: frontend-design
+-description: designs frontends
++description: designs frontends, fixed
+ ---
+ body
+`)
+	if err == nil {
+		t.Fatal("expected mismatched scratch paths to be rejected")
+	}
+	for _, want := range []string{"scratch/edited/SKILL.md", "SKILL.md", "git diff --no-index a b"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error does not mention %q: %s", want, err)
+		}
+	}
+}
+
+// TestPatchResolvesLiteralTopLevelADirectory covers a skill whose own file
+// sits under a top-level "a/". A header written without git's prefix has that
+// directory stripped as if it were one, leaving a path the skill does not
+// have; the file is found by re-prepending it, never by matching on filename.
+func TestPatchResolvesLiteralTopLevelADirectory(t *testing.T) {
+	svc := newSeededService(t)
+
+	if _, err := svc.RecordSuggestion(context.Background(), SuggestInput{
+		SkillName:    "frontend-design",
+		AgentID:      "agent-1",
+		SuggestionID: "add-notes",
+		Files:        []FileEdit{{FilePath: "a/notes.md", Content: "one\ntwo\n"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := suggestPatch(t, svc, "agent-1", "add-notes", `--- a/notes.md
++++ b/notes.md
+@@ -1,2 +1,2 @@
+ one
+-two
++three
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	md, err := svc.GetSkillAtRef(context.Background(), "frontend-design", res.Suggestion.Branch, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cf, ok := md.ContextFile("a/notes.md")
+	if !ok {
+		t.Fatal("a/notes.md is missing from the suggestion")
+	}
+	if cf.Content != "one\nthree\n" {
+		t.Errorf("content = %q, want the edit applied to a/notes.md", cf.Content)
 	}
 }
 

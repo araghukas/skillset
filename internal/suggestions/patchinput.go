@@ -87,41 +87,35 @@ func (s *Service) skillContentAt(ctx context.Context, skillName string, at plumb
 	return out, nil
 }
 
+// patchPathRecipe is restated in every path error: an agent that got a path
+// wrong is exactly the one that needs the layout spelled out again.
+const patchPathRecipe = `Mirror the skill under two directories named "a" and "b" - each file at its path relative to the skill directory - edit only under "b", and diff from their parent with "git diff --no-index a b" or "diff -ru a b". Paths then arrive relative to the skill directory.`
+
 // resolvePatchPaths rewrites each file section's paths to be relative to the
 // skill directory.
 //
-// The recipe callers are given - copy the file somewhere, edit a copy, diff
-// the two - produces paths naming those scratch locations, so requiring
-// skill-relative paths outright would reject the workflow this input exists to
-// support. A path is accepted when it is already skill-relative, when it
-// becomes so after dropping the skill's own directory, or when exactly one of
-// the skill's files is a suffix of it.
+// Callers mirror the skill under roots named a and b, which is the layout git's
+// own prefixes describe, so paths arrive skill-relative once the one-letter
+// prefix is dropped. Every candidate below is checked against content that
+// exists rather than inferred from the shape of the path: a patch either names
+// a file of this skill or is rejected. Guessing would let a diff of a scratch
+// copy land on a same-named file of a different skill.
 func (s *Service) resolvePatchPaths(files []patch.File, current map[string]string, skillName string) error {
-	// Prefixes dropped from existing files carry over to created ones, which
-	// have no content to be matched against: when a caller diffs two copies of
-	// a whole skill directory, the new file sits under the same scratch root
-	// as the ones that were only modified.
-	prefixes := make(map[string]bool)
-
 	for i := range files {
 		f := &files[i]
 		if f.Created() {
+			// A new file has no content to be matched against, so its path is
+			// taken as given once the skill directory is trimmed off, and
+			// validated by cleanSkillRelPath before anything is written.
+			trimmed, _ := s.trimSkillDir(f.Path(), skillName)
+			setPaths(f, trimmed)
 			continue
 		}
 		resolved, err := s.resolveExisting(f.Path(), current, skillName)
 		if err != nil {
 			return err
 		}
-		prefixes[strings.TrimSuffix(f.Path(), resolved)] = true
 		setPaths(f, resolved)
-	}
-
-	for i := range files {
-		f := &files[i]
-		if !f.Created() {
-			continue
-		}
-		setPaths(f, s.resolveCreated(f.Path(), skillName, prefixes))
 	}
 
 	return nil
@@ -139,48 +133,26 @@ func setPaths(f *patch.File, resolved string) {
 }
 
 func (s *Service) resolveExisting(p string, current map[string]string, skillName string) (string, error) {
-	if _, ok := current[p]; ok {
-		return p, nil
-	}
-	if trimmed, ok := s.trimSkillDir(p, skillName); ok {
-		if _, ok := current[trimmed]; ok {
-			return trimmed, nil
+	for _, cand := range s.pathCandidates(p, skillName) {
+		if _, ok := current[cand]; ok {
+			return cand, nil
 		}
 	}
-
-	var matches []string
-	for key := range current {
-		if strings.HasSuffix(p, "/"+key) {
-			matches = append(matches, key)
-		}
-	}
-	sort.Strings(matches)
-
-	switch len(matches) {
-	case 1:
-		return matches[0], nil
-	case 0:
-		return "", fmt.Errorf("suggestions: the patch changes %q, which is not a file of skill %q (its files: %s). Use paths relative to the skill directory",
-			p, skillName, strings.Join(sortedKeys(current), ", "))
-	default:
-		return "", fmt.Errorf("suggestions: the patch path %q matches more than one file of skill %q (%s); use the path relative to the skill directory",
-			p, skillName, strings.Join(matches, ", "))
-	}
+	return "", fmt.Errorf("suggestions: the patch changes %q, which is not a file of skill %q (its files: %s).\n%s",
+		p, skillName, strings.Join(sortedKeys(current), ", "), patchPathRecipe)
 }
 
-// resolveCreated maps a new file's path into the skill directory. There is no
-// existing file to match it against, so this is best effort: whatever survives
-// is validated as a skill-relative path before anything is written.
-func (s *Service) resolveCreated(p, skillName string, prefixes map[string]bool) string {
+// pathCandidates lists the skill-relative paths p could name, most literal
+// first.
+func (s *Service) pathCandidates(p, skillName string) []string {
+	out := []string{p}
 	if trimmed, ok := s.trimSkillDir(p, skillName); ok {
-		return trimmed
+		out = append(out, trimmed)
 	}
-	for prefix := range prefixes {
-		if prefix != "" && strings.HasPrefix(p, prefix) {
-			return strings.TrimPrefix(p, prefix)
-		}
-	}
-	return p
+	// patch.Parse strips git's one-letter prefix, which also strips a real
+	// leading directory named "a" or "b". Restore it if that is what p was.
+	out = append(out, "a/"+p, "b/"+p)
+	return out
 }
 
 // trimSkillDir drops a leading skill directory, with or without the registry's
@@ -218,8 +190,8 @@ func (s *Service) applyFailed(err error, files []patch.File, current map[string]
 	if onOwnBranch {
 		ref = fmt.Sprintf(", ref: %q", branch)
 	}
-	fmt.Fprintf(&b, "\nRe-read it with get_skill_at_ref({skill_name: %q%s, include_context_files: true}), diff against that, or send files with full content instead.",
-		req.SkillName, ref)
+	fmt.Fprintf(&b, "\nRe-read it with get_skill_at_ref({skill_name: %q%s, include_context_files: true}), diff against that, or send files with full content instead.\n%s",
+		req.SkillName, ref, patchPathRecipe)
 
 	return errors.New(b.String())
 }

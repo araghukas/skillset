@@ -72,18 +72,29 @@ creating a skill; send one or the other, never both. Regenerating a long file
 to change two lines is slow and invites you to corrupt the parts you weren't
 editing.
 
-1. Read the current content with **`get_skill_at_ref`** and write it to a
-   scratch file. Don't diff against `get_skill`'s copy: skillsd appends an
-   "Improving this skill" footer to every `SKILL.md` it serves, and that footer
-   is not in the repository, so any hunk near the end of the file will fail to
-   apply.
-2. Copy it, edit the copy.
-3. `git diff --no-index orig new`, or `diff -u orig new`, or write the diff
-   yourself. Send the output as `patch`.
+1. Read the current content with **`get_skill_at_ref`**. Don't diff against
+   `get_skill`'s copy: skillsd appends an "Improving this skill" footer to every
+   `SKILL.md` it serves, and that footer is not in the repository, so any hunk
+   near the end of the file will fail to apply.
+2. Write every file you're touching into two scratch
+   **directories named `a` and `b`**, each at its path relative to the skill
+   directory — the same paths `get_skill_at_ref` labelled them with:
 
-- Paths may be relative to the skill directory or name your scratch files;
-  `a/` and `b/` prefixes are fine. A **new** file needs its exact path relative
-  to the skill directory, since there's nothing to match it against.
+   ```
+   /tmp/sk/a/SKILL.md        /tmp/sk/b/SKILL.md
+   /tmp/sk/a/scripts/run.sh  /tmp/sk/b/scripts/run.sh
+   ```
+3. Edit only under `b/`, including any new files.
+4. From their parent: `git diff --no-index a b`, or `diff -ru a b`. Send the
+   output as `patch`.
+
+- The `a`/`b` names are not decoration — they're the prefixes git already uses,
+  so the diff header comes out relative to the skill directory with nothing to
+  strip. Diffing two differently-named scratch files instead produces paths the
+  registry cannot resolve, and the call is rejected.
+- A path that names no file of the skill is an error listing the skill's real
+  files. A **new** file needs its exact path relative to the skill directory,
+  since there's nothing to match it against.
 - Context and removed lines must match exactly, but the line numbers may be
   off — a hunk is found by its surroundings.
 - Renames, mode changes, and binary files aren't supported. Express a rename as

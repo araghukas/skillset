@@ -164,13 +164,17 @@ func TestJoinContextFilesSkipsMissing(t *testing.T) {
 
 // TestGuideExplainsHowToProduceAPatch pins the parts of the patch recipe an
 // agent cannot work out on its own: the tool that returns diffable content,
-// and the footer that makes the obvious alternative fail.
+// the footer that makes the obvious alternative fail, and the a/b scratch
+// layout the server resolves diff paths against.
 func TestGuideExplainsHowToProduceAPatch(t *testing.T) {
 	full, err := guideText("")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, phrase := range []string{"patch", "--no-index", "diff -u", "get_skill_at_ref", "Improving this skill"} {
+	for _, phrase := range []string{
+		"patch", "git diff --no-index a b", "diff -ru a b", "get_skill_at_ref",
+		"Improving this skill", "directories named `a` and `b`",
+	} {
 		if !strings.Contains(full, phrase) {
 			t.Errorf("full guide never mentions %q", phrase)
 		}

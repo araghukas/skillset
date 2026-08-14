@@ -6,5 +6,4 @@ description: Explains how to use skillsd and skillsd-registry, two MCP servers, 
 # Using skillsd
 
 This skill is assembled at runtime from the files in `references/` by
-`internal/clientguide` - it isn't served whole. `references/intro.md` is the
-opening section; start there.
+`internal/clientguide` - it isn't served whole. Start with the opening section, `references/intro.md`.

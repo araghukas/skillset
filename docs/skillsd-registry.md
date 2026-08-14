@@ -51,8 +51,10 @@ files, which have nothing to diff against. The server expands the patch into
 full content before anything else runs, so the rest of the write path sees one
 kind of request. It applies to the caller's own suggestion branch when they're
 iterating on one and to the base branch otherwise, matching context exactly but
-line numbers only approximately. A patch that doesn't apply is rejected with
-the hunk that failed and what the file says there instead.
+line numbers only approximately. Diff paths are resolved against the skill's
+real files; a path that matches none of them is rejected rather than guessed at.
+A patch that doesn't apply is rejected with the hunk that failed and what the
+file says there instead.
 
 Deploying it requires an HTTPS clone URL with push access and a write-capable
 credential (GitHub App installation or token). See

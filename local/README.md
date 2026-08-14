@@ -202,7 +202,9 @@ JSON-RPC level.
 
 `record_suggestion` against `skillsd-registry` — the change goes in `patch` as
 a unified diff. Read the file you're editing first, since the patch's context
-lines have to match what the registry has:
+lines have to match what the registry has. Paths in the diff header must be
+relative to the skill directory (a leading `a/` or `b/` is fine, since that's
+what `git diff` emits):
 
 ```bash
 curl -s -X POST http://localhost:8081/mcp \
