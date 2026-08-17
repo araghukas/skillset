@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"path"
 	"sort"
 	"strings"
@@ -82,8 +83,10 @@ func Open(ctx context.Context, dir, cloneURL, baseBranch string, tokens TokenSou
 			SingleBranch:  true,
 		})
 		if err != nil {
+			slog.Error("cloning repo failed", "url", cloneURL, "dir", dir, "branch", baseBranch, "error", err)
 			return nil, fmt.Errorf("gitrepo: cloning %s into %s: %w", cloneURL, dir, err)
 		}
+		slog.Info("cloned repo", "url", cloneURL, "dir", dir, "branch", baseBranch)
 	case err != nil:
 		return nil, fmt.Errorf("gitrepo: opening %s: %w", dir, err)
 	}
@@ -143,6 +146,7 @@ func (r *Repo) RefreshBase(ctx context.Context) error {
 	if err != nil && !errors.Is(err, git.NoErrAlreadyUpToDate) {
 		return fmt.Errorf("gitrepo: fetching %s: %w", r.baseBranch, err)
 	}
+	slog.Info("fetched base branch", "branch", r.baseBranch, "up_to_date", errors.Is(err, git.NoErrAlreadyUpToDate))
 
 	remoteRef, err := r.repo.Reference(plumbing.NewRemoteReferenceName("origin", r.baseBranch), true)
 	if err != nil {
@@ -262,6 +266,7 @@ func (r *Repo) CommitOnBranch(branch string, fromBase plumbing.Hash, files []Fil
 	if err != nil {
 		return plumbing.ZeroHash, fmt.Errorf("gitrepo: committing to %q: %w", branch, err)
 	}
+	slog.Info("committed to branch", "branch", branch, "commit", hash.String(), "files", len(files))
 	return hash, nil
 }
 
@@ -360,8 +365,10 @@ func (r *Repo) Push(ctx context.Context, branch string, alsoRefs ...string) erro
 		RefSpecs:   refSpecs,
 	})
 	if err != nil && !errors.Is(err, git.NoErrAlreadyUpToDate) {
+		slog.Error("pushing branch failed", "branch", branch, "also_refs", alsoRefs, "error", err)
 		return fmt.Errorf("gitrepo: pushing %q: %w", branch, err)
 	}
+	slog.Info("pushed branch", "branch", branch, "also_refs", alsoRefs, "up_to_date", errors.Is(err, git.NoErrAlreadyUpToDate))
 	return nil
 }
 

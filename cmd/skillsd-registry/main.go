@@ -20,6 +20,7 @@ import (
 	"github.com/araghukas/skillset/internal/submit"
 	"github.com/araghukas/skillset/internal/suggestions"
 	"github.com/araghukas/skillset/internal/suggestiontools"
+	"github.com/araghukas/skillset/internal/toollog"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -107,6 +108,7 @@ func run() error {
 			Capabilities: &mcp.ServerCapabilities{},
 		},
 	)
+	srv.AddReceivingMiddleware(toollog.Middleware)
 	suggestiontools.Add(srv, suggestiontools.Deps{
 		Suggestions:         svc,
 		Submitter:           submitter,

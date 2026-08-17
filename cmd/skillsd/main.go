@@ -15,6 +15,7 @@ import (
 	"github.com/araghukas/skillset/internal/registry"
 	"github.com/araghukas/skillset/internal/skilltools"
 	"github.com/araghukas/skillset/internal/storage"
+	"github.com/araghukas/skillset/internal/toollog"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -62,6 +63,7 @@ func run() error {
 			Capabilities: &mcp.ServerCapabilities{},
 		},
 	)
+	srv.AddReceivingMiddleware(toollog.Middleware)
 	skilltools.Add(srv, reg, cfg.MaxResultBytes, catalog)
 
 	return mcphttp.Serve(ctx, srv, mcphttp.Options{

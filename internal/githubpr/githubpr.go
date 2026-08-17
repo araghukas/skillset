@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 )
@@ -66,6 +67,8 @@ type PullRequest struct {
 // CreatePullRequest opens a pull request via
 // POST /repos/{owner}/{repo}/pulls.
 func (c *Client) CreatePullRequest(ctx context.Context, in PullRequestInput) (*PullRequest, error) {
+	slog.Info("creating pull request", "owner", c.owner, "repo", c.repo, "head", in.Head, "base", in.Base)
+
 	body, err := json.Marshal(struct {
 		Title string `json:"title"`
 		Body  string `json:"body,omitempty"`
@@ -106,6 +109,8 @@ func (c *Client) CreatePullRequest(ctx context.Context, in PullRequestInput) (*P
 	}
 
 	if resp.StatusCode != http.StatusCreated {
+		slog.Error("creating pull request failed", "owner", c.owner, "repo", c.repo, "head", in.Head, "base", in.Base,
+			"status", resp.Status)
 		return nil, fmt.Errorf("githubpr: creating pull request: %s: %s", resp.Status, respBody)
 	}
 
@@ -117,5 +122,7 @@ func (c *Client) CreatePullRequest(ctx context.Context, in PullRequestInput) (*P
 		return nil, fmt.Errorf("githubpr: decoding response: %w", err)
 	}
 
+	slog.Info("created pull request", "owner", c.owner, "repo", c.repo, "head", in.Head, "base", in.Base,
+		"number", parsed.Number, "url", parsed.HTMLURL)
 	return &PullRequest{URL: parsed.HTMLURL, Number: parsed.Number}, nil
 }
