@@ -31,7 +31,7 @@ registry:
     repo: "skills"
     apiBaseURL: "http://gitea:3000/api/v1"
 
-  autoSubmitEndorsements: 3
+  autoSubmitEndorsements: 2
 
   # Disable database backups for local deployment
   evidence:
