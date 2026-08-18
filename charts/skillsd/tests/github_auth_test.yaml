@@ -95,7 +95,7 @@ tests:
 
   # --- registry.github (main container) ---
 
-  - it: registry defaults to no credential, leaving submit propose-only
+  - it: registry defaults to no credential, so no pull request can be opened
     templates:
       - deployment-registry.yaml
     asserts:

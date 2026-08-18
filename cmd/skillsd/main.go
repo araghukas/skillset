@@ -4,22 +4,23 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"net"
 	"os"
 	"os/signal"
 	"syscall"
 
-	skillsv1 "github.com/araghukas/skillset/gen/skills/v1"
+	"github.com/araghukas/skillset/internal/clientguide"
 	"github.com/araghukas/skillset/internal/config"
 	"github.com/araghukas/skillset/internal/gitrev"
+	"github.com/araghukas/skillset/internal/mcphttp"
 	"github.com/araghukas/skillset/internal/registry"
-	"github.com/araghukas/skillset/internal/server"
+	"github.com/araghukas/skillset/internal/skilltools"
 	"github.com/araghukas/skillset/internal/storage"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/health"
-	"google.golang.org/grpc/health/grpc_health_v1"
-	"google.golang.org/grpc/reflection"
+	"github.com/araghukas/skillset/internal/toollog"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+// version is stamped at build time; unset in `go run`/`go test` builds.
+var version = "dev"
 
 func main() {
 	if err := run(); err != nil {
@@ -51,30 +52,24 @@ func run() error {
 	}
 	slog.Info("loaded skill index", "count", count)
 
-	healthSrv := health.NewServer()
-	healthSrv.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
+	catalog := reg.Catalog()
 
-	lis, err := net.Listen("tcp", cfg.GRPCAddr)
-	if err != nil {
-		return err
-	}
-
-	grpcServer := grpc.NewServer(
-		grpc.MaxRecvMsgSize(cfg.GRPCMaxRecvMsgSizeBytes),
-		grpc.MaxSendMsgSize(cfg.GRPCMaxSendMsgSizeBytes),
+	srv := mcp.NewServer(
+		&mcp.Implementation{Name: "skillsd", Version: version},
+		&mcp.ServerOptions{
+			Instructions: clientguide.Instructions(catalog),
+			// Suppress the SDK's default advertisement of a "logging"
+			// capability, which this server does not implement.
+			Capabilities: &mcp.ServerCapabilities{},
+		},
 	)
-	skillsv1.RegisterSkillServiceServer(grpcServer, server.New(reg))
-	grpc_health_v1.RegisterHealthServer(grpcServer, healthSrv)
-	reflection.Register(grpcServer)
+	srv.AddReceivingMiddleware(toollog.Middleware)
+	skilltools.Add(srv, reg, cfg.MaxResultBytes, catalog)
 
-	go func() {
-		<-ctx.Done()
-		slog.Info("shutdown signal received, draining connections")
-		grpcServer.GracefulStop()
-	}()
-
-	slog.Info("skillsd listening", "addr", cfg.GRPCAddr)
-	return grpcServer.Serve(lis)
+	return mcphttp.Serve(ctx, srv, mcphttp.Options{
+		Addr:                cfg.HTTPAddr,
+		MaxRequestBodyBytes: cfg.MaxRequestBodyBytes,
+	})
 }
 
 // resolveCommit determines the revision to stamp onto every served skill:

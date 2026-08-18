@@ -52,7 +52,11 @@ docker_build(
     'localhost:5005/skillsd',
     '.',
     dockerfile='Dockerfile',
-    ignore=['README.md', 'Makefile', '.gitignore'],
+    # Only these paths feed the built binaries (Dockerfile COPYs everything,
+    # but go build only touches these) - restricting to them, rather than
+    # denylisting non-build files like docs/ and scripts/, means new
+    # non-build files never need to be added here to avoid spurious rebuilds.
+    only=['go.mod', 'go.sum', 'cmd', 'internal'],
 )
 
 load("ext://base64", "encode_base64")

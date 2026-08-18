@@ -11,24 +11,33 @@ import (
 	"time"
 
 	"github.com/araghukas/skillset/internal/githubauth"
-	"github.com/araghukas/skillset/internal/proposals"
+	"github.com/araghukas/skillset/internal/suggestions"
 )
 
-// defaultGRPCMaxRecvMsgSizeBytes and defaultGRPCMaxSendMsgSizeBytes apply
-// when their respective env vars are unset. gRPC-Go itself defaults both to
-// 4 MiB; these are raised a little so a handful of files in one
-// ProposeChange call, or a large GetProposal diff, don't run into the
-// transport limit, while still bounding memory per request/response rather
-// than leaving it unbounded.
+// defaultMaxRequestBodyBytes and defaultMaxResultBytes apply when their
+// respective env vars are unset. See internal/config for the reasoning
+// behind each default - this binary mirrors it.
 const (
-	defaultGRPCMaxRecvMsgSizeBytes = 8 << 20 // 8 MiB
-	defaultGRPCMaxSendMsgSizeBytes = 8 << 20 // 8 MiB
+	defaultMaxRequestBodyBytes = 8 << 20   // 8 MiB
+	defaultMaxResultBytes      = 256 << 10 // 256 KiB
 )
 
 // Config holds runtime configuration loaded from the environment.
 type Config struct {
-	// GRPCAddr is the address the ProposalService gRPC server listens on.
-	GRPCAddr string
+	// HTTPAddr is the address the MCP server listens on over Streamable
+	// HTTP.
+	HTTPAddr string
+
+	// MaxRequestBodyBytes caps a single incoming MCP request body - the
+	// whole record_suggestion call, including every file.
+	MaxRequestBodyBytes int64
+
+	// MaxResultBytes caps the context-file content one get_skill_at_ref
+	// call returns, and the diff one get_suggestion call returns. Not
+	// transport-enforced; internal/toolresult applies it when building a
+	// reply, dropping whole files or truncating at a diff hunk boundary
+	// and always naming what was left out.
+	MaxResultBytes int
 
 	// RepoDir is the local directory the git working copy is kept in. It's
 	// expected to be a persistent volume: unlike skillsd's read-only
@@ -38,7 +47,7 @@ type Config struct {
 	// SkillsRepoURL is the HTTPS clone URL of the skills repository.
 	SkillsRepoURL string
 
-	// SkillsRepoBaseBranch is the branch proposals fork from and pull
+	// SkillsRepoBaseBranch is the branch suggestions fork from and pull
 	// requests target.
 	SkillsRepoBaseBranch string
 
@@ -50,8 +59,9 @@ type Config struct {
 	// GitHubAuth supplies the credential for both the HTTPS git clone/
 	// fetch/push and the GitHub REST API calls used to open pull requests -
 	// one credential rather than two. Nil means none was configured, which
-	// disables SubmitProposal (see below) and limits the repo to public,
-	// unauthenticated access.
+	// leaves auto-submission unable to open pull requests (see
+	// SubmitConfigured below) and limits the repo to public, unauthenticated
+	// access.
 	GitHubAuth githubauth.TokenSource
 
 	// GitHubAuthMode records which scheme GitHubAuth came from, for
@@ -68,31 +78,33 @@ type Config struct {
 	// Enterprise deployments.
 	GitHubAPIBaseURL string
 
-	// SubmitProposalEnabled controls whether the ProposalService's
-	// SubmitProposal RPC is allowed to push branches and open pull
-	// requests. It's the SUBMIT_PROPOSAL_ENABLED env var (default true)
-	// AND-ed with whether GitHub auth (a credential, plus owner/repo) is
-	// actually configured.
-	SubmitProposalEnabled bool
+	// SubmitConfigured reports whether pushing a branch and opening a pull
+	// request is possible at all: a credential, an owner, and a repo. It is
+	// derived from those three rather than set on its own, since there is no
+	// useful configuration where they are present and submission is not
+	// wanted - AutoSubmitEndorsements is where that choice is made.
+	SubmitConfigured bool
 
 	// AutoSubmitEndorsements is how many agents must independently arrive
-	// at identical content before a pull request is opened for it without
-	// anyone asking. Zero (the default) disables auto-submission entirely.
+	// at identical content before a pull request is opened for it. It is
+	// the only path to a pull request: no tool lets a caller ask for one.
+	// Zero means suggestions accumulate as local branches and are never
+	// pushed anywhere.
 	//
-	// This is the only setting that lets the registry act on its own, and
-	// it is exactly as trustworthy as agent_id is: with self-asserted
-	// identities, one misbehaving caller can manufacture a threshold's
-	// worth of agreement by itself. Enable it once callers are
-	// authenticated, not before.
-	AutoSubmitEndorsements int32
+	// The threshold is exactly as trustworthy as agent_id is: with
+	// self-asserted identities, one misbehaving caller can manufacture a
+	// threshold's worth of agreement by itself. Size it for callers you
+	// have authenticated.
+	AutoSubmitEndorsements int
 
 	// FetchInterval is how often the base branch is re-fetched from
 	// origin in the background.
 	FetchInterval time.Duration
 
-	// EvidenceEnabled controls whether EvidenceService is served at all.
-	// Disabled, its RPCs return Unimplemented and no database is opened;
-	// everything else about the registry is unaffected.
+	// EvidenceEnabled controls whether the evidence tools are registered
+	// at all. Disabled, no database is opened and report_outcome,
+	// list_skill_signals, and list_outcome_reports are simply absent from
+	// tools/list; everything else about the registry is unaffected.
 	EvidenceEnabled bool
 
 	// EvidenceDBPath is the SQLite file outcome reports are stored in.
@@ -100,7 +112,7 @@ type Config struct {
 	// upstream can reconstruct this file - see internal/evidence.
 	EvidenceDBPath string
 
-	// EvidenceVerifyCommits makes ReportOutcome reject reports naming a
+	// EvidenceVerifyCommits makes report_outcome reject reports naming a
 	// skill/commit pair the repository doesn't contain.
 	EvidenceVerifyCommits bool
 
@@ -120,18 +132,8 @@ type Config struct {
 	// EvidenceBackupInterval is how often a snapshot is taken.
 	EvidenceBackupInterval time.Duration
 
-	// GRPCMaxRecvMsgSizeBytes caps the size of a single incoming gRPC
-	// message (grpc.MaxRecvMsgSize) - the whole ProposeChangeRequest,
-	// including every FileChange in the call.
-	GRPCMaxRecvMsgSizeBytes int
-
-	// GRPCMaxSendMsgSizeBytes caps the size of a single outgoing gRPC
-	// message (grpc.MaxSendMsgSize) - relevant here for GetProposal's diff
-	// and GetSkillAtRef's context files.
-	GRPCMaxSendMsgSizeBytes int
-
-	// MaxFileContentBytes caps a single FileChange's content, passed
-	// through to proposals.New.
+	// MaxFileContentBytes caps a single FileEdit's content, passed
+	// through to suggestions.New.
 	MaxFileContentBytes int
 
 	// LogLevel is the minimum slog level emitted by the process.
@@ -151,21 +153,17 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("parsing FETCH_INTERVAL: %w", err)
 	}
 
-	maxRecvMsgSize, err := getenvInt("GRPC_MAX_RECV_MSG_SIZE_BYTES", defaultGRPCMaxRecvMsgSizeBytes)
-	if err != nil {
-		return Config{}, fmt.Errorf("parsing GRPC_MAX_RECV_MSG_SIZE_BYTES: %w", err)
-	}
-	maxSendMsgSize, err := getenvInt("GRPC_MAX_SEND_MSG_SIZE_BYTES", defaultGRPCMaxSendMsgSizeBytes)
-	if err != nil {
-		return Config{}, fmt.Errorf("parsing GRPC_MAX_SEND_MSG_SIZE_BYTES: %w", err)
-	}
-	maxFileContentBytes, err := getenvInt("MAX_FILE_CONTENT_BYTES", proposals.DefaultMaxFileContentBytes)
+	maxFileContentBytes, err := getenvInt("MAX_FILE_CONTENT_BYTES", suggestions.DefaultMaxFileContentBytes)
 	if err != nil {
 		return Config{}, fmt.Errorf("parsing MAX_FILE_CONTENT_BYTES: %w", err)
 	}
-	submitProposalRequested, err := getenvBool("SUBMIT_PROPOSAL_ENABLED", true)
+	maxRequestBodyBytes, err := getenvInt("MAX_REQUEST_BODY_BYTES", defaultMaxRequestBodyBytes)
 	if err != nil {
-		return Config{}, fmt.Errorf("parsing SUBMIT_PROPOSAL_ENABLED: %w", err)
+		return Config{}, fmt.Errorf("parsing MAX_REQUEST_BODY_BYTES: %w", err)
+	}
+	maxResultBytes, err := getenvInt("MAX_RESULT_BYTES", defaultMaxResultBytes)
+	if err != nil {
+		return Config{}, fmt.Errorf("parsing MAX_RESULT_BYTES: %w", err)
 	}
 	autoSubmitEndorsements, err := getenvInt("AUTO_SUBMIT_ENDORSEMENTS", 0)
 	if err != nil {
@@ -198,40 +196,39 @@ func Load() (Config, error) {
 	}
 
 	cfg := Config{
-		GRPCAddr:                getenv("GRPC_ADDR", ":8081"),
-		RepoDir:                 getenv("REPO_DIR", "/var/lib/skillsd-registry"),
-		SkillsRepoURL:           getenv("SKILLS_REPO_URL", ""),
-		SkillsRepoBaseBranch:    getenv("SKILLS_REPO_BASE_BRANCH", "main"),
-		SkillsSubPath:           getenv("SKILLS_SUBPATH", ""),
-		GitHubAuth:              githubAuth,
-		GitHubAuthMode:          githubAuthMode,
-		GitHubOwner:             getenv("GITHUB_OWNER", ""),
-		GitHubRepo:              getenv("GITHUB_REPO", ""),
-		GitHubAPIBaseURL:        getenv("GITHUB_API_BASE_URL", "https://api.github.com"),
-		AutoSubmitEndorsements:  int32(autoSubmitEndorsements),
-		FetchInterval:           fetchInterval,
-		EvidenceEnabled:         evidenceEnabled,
-		EvidenceDBPath:          getenv("EVIDENCE_DB_PATH", "/var/lib/skillsd-evidence/evidence.db"),
-		EvidenceVerifyCommits:   evidenceVerifyCommits,
-		EvidenceRetention:       evidenceRetention,
-		EvidenceRollupInterval:  evidenceRollupInterval,
-		EvidenceBackupPath:      getenv("EVIDENCE_BACKUP_PATH", ""),
-		EvidenceBackupInterval:  evidenceBackupInterval,
-		GRPCMaxRecvMsgSizeBytes: maxRecvMsgSize,
-		GRPCMaxSendMsgSizeBytes: maxSendMsgSize,
-		MaxFileContentBytes:     maxFileContentBytes,
-		LogLevel:                level,
+		HTTPAddr:               getenv("HTTP_ADDR", ":8081"),
+		MaxRequestBodyBytes:    int64(maxRequestBodyBytes),
+		MaxResultBytes:         maxResultBytes,
+		RepoDir:                getenv("REPO_DIR", "/var/lib/skillsd-registry"),
+		SkillsRepoURL:          getenv("SKILLS_REPO_URL", ""),
+		SkillsRepoBaseBranch:   getenv("SKILLS_REPO_BASE_BRANCH", "main"),
+		SkillsSubPath:          getenv("SKILLS_SUBPATH", ""),
+		GitHubAuth:             githubAuth,
+		GitHubAuthMode:         githubAuthMode,
+		GitHubOwner:            getenv("GITHUB_OWNER", ""),
+		GitHubRepo:             getenv("GITHUB_REPO", ""),
+		GitHubAPIBaseURL:       getenv("GITHUB_API_BASE_URL", "https://api.github.com"),
+		AutoSubmitEndorsements: autoSubmitEndorsements,
+		FetchInterval:          fetchInterval,
+		EvidenceEnabled:        evidenceEnabled,
+		EvidenceDBPath:         getenv("EVIDENCE_DB_PATH", "/var/lib/skillsd-evidence/evidence.db"),
+		EvidenceVerifyCommits:  evidenceVerifyCommits,
+		EvidenceRetention:      evidenceRetention,
+		EvidenceRollupInterval: evidenceRollupInterval,
+		EvidenceBackupPath:     getenv("EVIDENCE_BACKUP_PATH", ""),
+		EvidenceBackupInterval: evidenceBackupInterval,
+		MaxFileContentBytes:    maxFileContentBytes,
+		LogLevel:               level,
 	}
 
 	if cfg.SkillsRepoURL == "" {
 		return Config{}, fmt.Errorf("SKILLS_REPO_URL is required")
 	}
 
-	// GitHub auth is only required for SubmitProposal (pushing + opening a
-	// PR), not for the rest of the service. Rather than fail to start when
-	// it's absent, disable SubmitProposal.
-	cfg.SubmitProposalEnabled = submitProposalRequested &&
-		cfg.GitHubAuth != nil && cfg.GitHubOwner != "" && cfg.GitHubRepo != ""
+	// GitHub auth is only required for pushing a branch and opening a pull
+	// request, not for the rest of the service. Rather than fail to start
+	// when it's absent, run without a path to the forge.
+	cfg.SubmitConfigured = cfg.GitHubAuth != nil && cfg.GitHubOwner != "" && cfg.GitHubRepo != ""
 
 	return cfg, nil
 }

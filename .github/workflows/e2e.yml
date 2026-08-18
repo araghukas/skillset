@@ -48,10 +48,9 @@ jobs:
         with:
           install_only: true
 
-      - name: Install ctlptl, tilt, grpcurl
+      - name: Install ctlptl, tilt
         run: |
           go install github.com/tilt-dev/ctlptl/cmd/ctlptl@latest
-          go install github.com/fullstorydev/grpcurl/cmd/grpcurl@latest
           curl -fsSL https://raw.githubusercontent.com/tilt-dev/tilt/master/scripts/install.sh | bash
 
       - name: Cluster up + Gitea bootstrap
@@ -70,8 +69,8 @@ jobs:
           kubectl --context "$KIND_CONTEXT" port-forward svc/skillsd-registry 8081:8081 >/tmp/pf-registry.log 2>&1 &
 
           for i in $(seq 1 30); do
-            if grpcurl -plaintext -connect-timeout 2 localhost:8080 list >/dev/null 2>&1 \
-              && grpcurl -plaintext -connect-timeout 2 localhost:8081 list >/dev/null 2>&1; then
+            if curl -fsS localhost:8080/healthz >/dev/null 2>&1 \
+              && curl -fsS localhost:8081/healthz >/dev/null 2>&1; then
               echo "both port-forwards are up"
               exit 0
             fi

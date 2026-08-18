@@ -8,7 +8,6 @@ RELEASE       := skillsd
 KIND_CONTEXT  := kind-skillsd
 CLUSTER_CFG   := local/cluster.yaml
 VALUES        := local/values.yaml
-GRPC_PORT     := 8080
 
 # Upstream repo the local Gitea stand-in is seeded from (see local/gitea-init.sh).
 # Override on the command line: make gitea-up GITEA_SEED_URL=https://github.com/me/my-skills.git
@@ -43,8 +42,8 @@ build: ## Build the skillsd, skillsd-registry, and skillsd-init binaries into ./
 	go build -o bin/$(APP)-init ./cmd/skillsd-init
 
 .PHONY: test
-test: ## Run the test suite
-	go test ./...
+test: ## Run the test suite (race detector on - see internal/skill.Metadata.Clone)
+	go test -race ./...
 
 .PHONY: vet
 vet: ## Run go vet
@@ -54,13 +53,20 @@ vet: ## Run go vet
 fmt: ## Format Go source
 	gofmt -l -w .
 
-.PHONY: proto
-proto: ## Regenerate Go code from proto/
-	buf generate
-
 .PHONY: clean
 clean: ## Remove build artifacts
 	rm -rf bin/
+
+## --- Scripts ---
+
+.PHONY: hook-embed
+hook-embed: ## Regenerate onboard-claude.sh's embedded copy of skillset-hook.sh
+	./scripts/embed-hook.sh
+
+.PHONY: test-scripts
+test-scripts: ## Test the Claude Code hook script and the settings.json merge
+	./scripts/embed-hook.sh --check
+	./scripts/skillset-hook_test.sh
 
 ## --- Docker ---
 
@@ -133,5 +139,5 @@ logs: ## Tail skillsd logs on the local cluster
 ## --- Verification ---
 
 .PHONY: verify
-verify: ## Run gRPC verification scripts against the running local deployment
-	./local/verify/run-all.sh
+verify: ## Run MCP verification tests against the running local deployment
+	go test -tags e2e -count=1 -v ./local/verify/...

@@ -30,8 +30,8 @@ func TestCreatePullRequestSendsExpectedRequest(t *testing.T) {
 	client := New(server.URL, "acme", "skills", githubauth.Static("test-token"))
 	pr, err := client.CreatePullRequest(context.Background(), PullRequestInput{
 		Title: "Fix typo in frontend-design",
-		Body:  "proposed by agent-1",
-		Head:  "proposals/agent-1/frontend-design/fix-typo",
+		Body:  "suggested by agent-1",
+		Head:  "suggestions/agent-1/frontend-design/fix-typo",
 		Base:  "main",
 	})
 	if err != nil {
@@ -47,7 +47,7 @@ func TestCreatePullRequestSendsExpectedRequest(t *testing.T) {
 	if gotAuth != "Bearer test-token" {
 		t.Errorf("unexpected Authorization header: %s", gotAuth)
 	}
-	if gotBody["head"] != "proposals/agent-1/frontend-design/fix-typo" || gotBody["base"] != "main" {
+	if gotBody["head"] != "suggestions/agent-1/frontend-design/fix-typo" || gotBody["base"] != "main" {
 		t.Errorf("unexpected request body: %+v", gotBody)
 	}
 
@@ -65,7 +65,7 @@ func TestCreatePullRequestReturnsErrorOnNon201(t *testing.T) {
 
 	client := New(server.URL, "acme", "skills", githubauth.Static("test-token"))
 	_, err := client.CreatePullRequest(context.Background(), PullRequestInput{
-		Title: "x", Head: "proposals/agent-1/frontend-design/fix-typo", Base: "main",
+		Title: "x", Head: "suggestions/agent-1/frontend-design/fix-typo", Base: "main",
 	})
 	if err == nil {
 		t.Fatal("expected error for non-201 response")
@@ -93,7 +93,7 @@ func TestCreatePullRequestReadsTheTokenPerRequest(t *testing.T) {
 	client := New(server.URL, "acme", "skills", &rotatingTokens{})
 	for range 2 {
 		if _, err := client.CreatePullRequest(context.Background(), PullRequestInput{
-			Title: "x", Head: "proposals/agent-1/frontend-design/fix-typo", Base: "main",
+			Title: "x", Head: "suggestions/agent-1/frontend-design/fix-typo", Base: "main",
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -110,7 +110,7 @@ func TestCreatePullRequestReadsTheTokenPerRequest(t *testing.T) {
 func TestCreatePullRequestFailsWithoutACredential(t *testing.T) {
 	client := New("https://api.github.com", "acme", "skills", nil)
 	_, err := client.CreatePullRequest(context.Background(), PullRequestInput{
-		Title: "x", Head: "proposals/agent-1/frontend-design/fix-typo", Base: "main",
+		Title: "x", Head: "suggestions/agent-1/frontend-design/fix-typo", Base: "main",
 	})
 	if err == nil {
 		t.Fatal("expected an error when no credential is configured")

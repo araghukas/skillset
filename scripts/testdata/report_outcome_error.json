@@ -1,0 +1,26 @@
+{
+  "session_id": "@@SESSION@@",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "mcp__skillsd-registry__report_outcome",
+  "tool_input": {
+    "report_id": "11111111-2222-3333-4444-555555555555",
+    "agent_id": "agent-under-test",
+    "session_id": "@@SESSION@@",
+    "skills": [
+      {
+        "skill_name": "@@SKILL@@",
+        "skill_commit": "@@COMMIT@@",
+        "verdict": "applied"
+      }
+    ]
+  },
+  "tool_response": {
+    "isError": true,
+    "content": [
+      {
+        "type": "text",
+        "text": "cannot attribute outcome to @@SKILL@@@@@COMMIT@@: unknown commit"
+      }
+    ]
+  }
+}

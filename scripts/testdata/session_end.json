@@ -1,0 +1,7 @@
+{
+  "session_id": "@@SESSION@@",
+  "transcript_path": "/tmp/transcript.jsonl",
+  "cwd": "/work",
+  "hook_event_name": "SessionEnd",
+  "reason": "exit"
+}

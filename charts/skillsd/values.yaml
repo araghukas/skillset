@@ -9,17 +9,22 @@ image:
   tag: ""
   pullPolicy: IfNotPresent
 
-grpcAddr: ":8080"
+httpAddr: ":8080"
 
 # logLevel sets the minimum slog level for skillsd and skillsd-registry.
 logLevel: info
 
-# grpcMaxRecvMsgSizeMiB / grpcMaxSendMsgSizeMiB cap the size (in MiB) of a
-# single incoming/outgoing gRPC message (grpc.MaxRecvMsgSize /
-# grpc.MaxSendMsgSize). gRPC-Go itself defaults both to 4 MiB; the send side
-# matters here for GetSkillAtRef responses that include context files.
-grpcMaxRecvMsgSizeMiB: 8
-grpcMaxSendMsgSizeMiB: 8
+# maxRequestBodyMiB caps the size (in MiB) of a single incoming MCP request
+# body. The SDK's own default is 4 MiB; this is raised a little so a
+# handful of skill/context files in one call don't run into it.
+maxRequestBodyMiB: 8
+
+# maxResultKiB caps the context-file content a single get_skill call
+# returns, in KiB (note the unit - this is not MiB, unlike the request-body
+# setting above). It isn't a transport limit: skillsd applies it when
+# building a reply, dropping whole files rather than truncating one and
+# always naming what was left out.
+maxResultKiB: 256
 
 service:
   type: ClusterIP
@@ -85,13 +90,14 @@ podSecurityContext:
   fsGroup: 65532
 
 # registry configures the skillsd-registry component: a single-replica,
-# persistent write path that lets AI agents propose changes to skills as git
-# commits and submit them as GitHub pull requests for human review, and that
-# collects the outcome reports backing those proposals (see evidence below).
+# persistent write path that lets AI agents suggest changes to skills as git
+# commits, turns the suggestions enough agents agree on into GitHub pull
+# requests for human review, and collects the outcome reports backing those
+# suggestions (see evidence below).
 #
 # Deployed by default. Setting enabled: false drops it entirely, leaving the
 # read-only skillsd fleet above to run standalone - a read-only deployment
-# with no propose or evidence path at all.
+# with no suggestion or evidence path at all.
 registry:
   enabled: true
 
@@ -102,9 +108,9 @@ registry:
     tag: ""
     pullPolicy: IfNotPresent
 
-  # grpcAddr is passed through as GRPC_ADDR; service.port must match its
+  # httpAddr is passed through as HTTP_ADDR; service.port must match its
   # port number.
-  grpcAddr: ":8081"
+  httpAddr: ":8081"
 
   service:
     type: ClusterIP
@@ -116,18 +122,21 @@ registry:
   # meant to track live upstream state.
   fetchInterval: 5m
 
-  # grpcMaxRecvMsgSizeMiB / grpcMaxSendMsgSizeMiB cap the size (in MiB) of a
-  # single incoming/outgoing gRPC message. The recv side bounds a whole
-  # ProposeChangeRequest (every FileChange in the call counts against it);
-  # the send side matters for GetProposal's diff and GetSkillAtRef's
-  # context files. gRPC-Go itself defaults both to 4 MiB.
-  grpcMaxRecvMsgSizeMiB: 8
-  grpcMaxSendMsgSizeMiB: 8
+  # maxRequestBodyMiB caps the size (in MiB) of a single incoming MCP
+  # request body - a whole record_suggestion call, including every file in it.
+  # The SDK's own default is 4 MiB.
+  maxRequestBodyMiB: 8
 
-  # maxFileContentSizeMiB caps a single proposed file's content (in MiB)
-  # before ProposeChange rejects it with a clear application-level error,
-  # rather than letting a large blob into repo history or the gRPC
-  # transport reject it with a confusing ResourceExhausted.
+  # maxResultKiB caps the context-file content a single get_skill_at_ref
+  # call returns, and the diff a single get_suggestion call returns, in KiB
+  # (not MiB - see the top-level maxResultKiB comment for why the unit
+  # differs from the request-body setting).
+  maxResultKiB: 256
+
+  # maxFileContentSizeMiB caps a single suggested file's content (in MiB)
+  # before record_suggestion rejects it with a clear application-level error,
+  # rather than letting a large blob into repo history or the transport
+  # reject it with a confusing size error.
   maxFileContentSizeMiB: 1
 
   # repoDir is where the git working copy is kept, inside the PVC below.
@@ -141,53 +150,54 @@ registry:
     # url is the HTTPS clone URL of the skills repository. Usually the same
     # value as skillsRepo.url above.
     url: ""
-    # baseBranch is the branch proposals fork from and pull requests target.
+    # baseBranch is the branch suggestions fork from and pull requests target.
     baseBranch: main
     # subPath is an optional subdirectory within the repo under which skill
     # directories actually live. Leave empty if skills sit at the repo root.
     subPath: skills
 
-  # submitProposalEnabled controls whether the SubmitProposal RPC is allowed
-  # to push a proposal's branch and open a pull request. ProposeChange,
-  # GetProposal, ListProposals, and GetSkillAtRef all work regardless -
-  # this only gates the final push+PR step. Setting it false is the explicit
-  # way to run propose-only; configuring no credential under github below
-  # has the same effect implicitly.
-  submitProposalEnabled: true
-
   # autoSubmitEndorsements is how many agents must independently arrive at
-  # byte-identical content before a pull request is opened for it with
-  # nobody asking. When a second agent proposes content that already exists,
-  # it doesn't get its own branch: it's recorded as an endorsement of the
-  # first, and this counts those endorsements.
+  # byte-identical content before a pull request is opened for it. When a
+  # second agent suggests content that already exists, it doesn't get its own
+  # branch: it's recorded as an endorsement of the first, and this counts
+  # those endorsements.
   #
-  # 0 (the default) disables it, and that default is deliberate. This is the
-  # only setting that lets the registry act on its own, and it is exactly as
-  # trustworthy as agent_id is - with self-asserted identities, a single
-  # misconfigured caller can manufacture a threshold's worth of agreement by
-  # itself. Turn it on once callers are authenticated.
-  autoSubmitEndorsements: 0
+  # This is the only path to a pull request. No MCP tool lets an agent ask
+  # for one, so a suggestion reaches a human reviewer by corroboration or not
+  # at all. Set to 0 and suggestions accumulate as branches in repoData below,
+  # never pushed anywhere - a reasonable choice only if you intend to collect
+  # suggestions and act on them by hand.
+  #
+  # The threshold is exactly as trustworthy as agent_id is: with
+  # self-asserted identities, a single misconfigured caller can manufacture a
+  # threshold's worth of agreement by itself. Size it for callers you have
+  # authenticated.
+  autoSubmitEndorsements: 2
 
-  # evidence configures EvidenceService: the store of agent outcome reports
-  # that turns "an agent wants to change this skill" into "this version of
-  # the skill was cited by N reported sessions and contradicted reality in
-  # M% of them". It is the only part of skillset whose data is not derived
-  # from git - see persistence and backup below.
+  # evidence configures the evidence tools (report_outcome,
+  # list_skill_signals, list_outcome_reports): the store of agent outcome
+  # reports that turns "an agent wants to change this skill" into "this
+  # version of the skill was cited by N reported sessions and contradicted
+  # reality in M% of them". It is the only part of skillset whose data is
+  # not derived from git - see persistence and backup below.
+  #
+  # Disabling it removes the three evidence tools from the server's
+  # tools/list entirely, rather than registering them to fail - an agent
+  # sees no report_outcome tool at all instead of discovering it errors.
   evidence:
     enabled: true
 
     # dbPath is the SQLite file, inside the evidence volume below.
     dbPath: /var/lib/skillsd-evidence/evidence.db
 
-    # verifyCommits makes ReportOutcome reject reports naming a
+    # verifyCommits makes report_outcome reject reports naming a
     # skill/commit pair the repository doesn't contain. This is the main
     # thing keeping a misconfigured agent from quietly filling the store
     # with rows that look like signal.
     #
     # A report can be rejected simply for naming a commit newer than the
-    # registry's last fetch of the base branch; that returns
-    # FailedPrecondition, and since report IDs make retries idempotent, the
-    # agent's correct response is to retry shortly.
+    # registry's last fetch of the base branch; report IDs make retries
+    # idempotent, so the agent's correct response is to retry shortly.
     verifyCommits: true
 
     # retention is how long individual reports are kept before being folded
@@ -224,7 +234,7 @@ registry:
 
   github:
     # owner/repo identify the GitHub repository pull requests are opened
-    # against. Required only if submitProposalEnabled is true.
+    # against. Required for any pull request to open at all.
     owner: ""
     repo: ""
 
@@ -234,9 +244,10 @@ registry:
     # pull-request API call. Set githubApp (recommended) or tokenSecret, not
     # both.
     #
-    # Leaving both empty runs in propose-only mode (SubmitProposal
-    # disabled), which is viable only against a public repo - a private one
-    # still needs a credential here just to clone and fetch.
+    # Leaving both empty means suggestions are committed locally and never
+    # pushed, no matter how many agents corroborate them. That is viable only
+    # against a public repo - a private one still needs a credential here
+    # just to clone and fetch.
     #
     # Whichever is used needs write access here, unlike skillsRepo above:
     # "Contents: Read and write" plus "Pull requests: Read and write". It can

@@ -1,9 +1,9 @@
 // Package skillparse reads a single skill's SKILL.md frontmatter and
 // supporting context files off a storage.Backend and builds the
-// skills.v1.SkillMetadata proto for it. It is shared by internal/registry
-// (a static, once-loaded index) and the git-backed proposal reader (which
-// resolves the same shape at an arbitrary commit), so the two never drift in
-// how they parse or validate a skill.
+// skill.Metadata for it. It is shared by internal/registry (a static,
+// once-loaded index) and the git-backed suggestion reader (which resolves the
+// same shape at an arbitrary commit), so the two never drift in how they
+// parse or validate a skill.
 package skillparse
 
 import (
@@ -15,7 +15,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	skillsv1 "github.com/araghukas/skillset/gen/skills/v1"
+	"github.com/araghukas/skillset/internal/skill"
 	"github.com/araghukas/skillset/internal/storage"
 	"gopkg.in/yaml.v3"
 )
@@ -43,14 +43,14 @@ type frontmatter struct {
 
 // Load reads a single skill named name, rooted at prefix within backend,
 // from the given set of file keys (all keys inside the skill's directory,
-// including its SKILL.md). It returns the fully populated SkillMetadata, or
-// an error if SKILL.md is missing or its frontmatter fails validation.
-func Load(ctx context.Context, backend storage.Backend, prefix, name string, files []string) (*skillsv1.SkillMetadata, error) {
+// including its SKILL.md). It returns the fully populated metadata, or an
+// error if SKILL.md is missing or its frontmatter fails validation.
+func Load(ctx context.Context, backend storage.Backend, prefix, name string, files []string) (*skill.Metadata, error) {
 	dirKey := path.Join(prefix, name)
 	skillKey := path.Join(dirKey, SkillFileName)
 
 	var fm *frontmatter
-	var contextFiles []*skillsv1.SkillContextFile
+	var contextFiles []skill.ContextFile
 
 	for _, key := range files {
 		obj, err := backend.Get(ctx, key)
@@ -72,14 +72,14 @@ func Load(ctx context.Context, backend storage.Backend, prefix, name string, fil
 		}
 
 		if !utf8.Valid(obj.Content) {
-			// SkillContextFile.content is a proto3 string field, which must be
+			// ContextFile.Content is carried as a JSON string, which must be
 			// valid UTF-8; binary assets (images, etc.) can't be represented
 			// here, so skip them rather than fail the whole skill.
 			slog.Debug("skillparse: skipping non-UTF-8 file", "skill", name, "key", key)
 			continue
 		}
 
-		contextFiles = append(contextFiles, &skillsv1.SkillContextFile{
+		contextFiles = append(contextFiles, skill.ContextFile{
 			FilePath: strings.TrimPrefix(key, dirKey+"/"),
 			Content:  string(obj.Content),
 			MimeType: obj.ContentType,
@@ -103,14 +103,14 @@ func Load(ctx context.Context, backend storage.Backend, prefix, name string, fil
 		return nil, fmt.Errorf("frontmatter missing required field %q", "description")
 	}
 
-	return &skillsv1.SkillMetadata{
+	return &skill.Metadata{
 		Name:          name,
 		Description:   fm.Description,
 		License:       fm.License,
 		Compatibility: fm.Compatibility,
 		Metadata:      fm.Metadata,
 		AllowedTools:  fm.AllowedTools,
-		JsonSchema:    fm.Metadata["json_schema"],
+		JSONSchema:    fm.Metadata["json_schema"],
 		ContextFiles:  contextFiles,
 	}, nil
 }

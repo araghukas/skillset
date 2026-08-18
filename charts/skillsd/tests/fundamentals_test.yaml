@@ -55,23 +55,54 @@ tests:
       - hasDocuments:
           count: 0
 
-  - it: converts MiB values to bytes for the gRPC limits
+  - it: converts MiB to bytes for the request-body limit
     templates:
       - deployment.yaml
     set:
-      grpcMaxRecvMsgSizeMiB: 8
-      grpcMaxSendMsgSizeMiB: 16
+      maxRequestBodyMiB: 8
     asserts:
       - contains:
           path: spec.template.spec.containers[0].env
           content:
-            name: GRPC_MAX_RECV_MSG_SIZE_BYTES
+            name: MAX_REQUEST_BODY_BYTES
             value: "8388608"
+
+  # A different unit than the request-body limit above (KiB, not MiB) -
+  # this proves the unit conversion is actually wired to the right value,
+  # not just copy-pasted from maxRequestBodyMiB.
+  - it: converts KiB to bytes for the result limit
+    templates:
+      - deployment.yaml
+    set:
+      maxResultKiB: 256
+    asserts:
       - contains:
           path: spec.template.spec.containers[0].env
           content:
-            name: GRPC_MAX_SEND_MSG_SIZE_BYTES
-            value: "16777216"
+            name: MAX_RESULT_BYTES
+            value: "262144"
+
+  - it: probes health over HTTP on both workloads
+    templates:
+      - deployment.yaml
+      - deployment-registry.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.httpGet.path
+          value: /healthz
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.httpGet.port
+          value: http
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.httpGet.path
+          value: /healthz
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.httpGet.port
+          value: http
+      - notExists:
+          path: spec.template.spec.containers[0].readinessProbe.grpc
+      - notExists:
+          path: spec.template.spec.containers[0].livenessProbe.grpc
 
   # skillsd's volume, written by the init container, and must be read-only
   - it: mounts the skills volume read-only in the serving container

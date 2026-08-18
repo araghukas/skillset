@@ -22,6 +22,7 @@ coverage.out
 coverage.html
 
 # --- Editors / IDEs ---
+CLAUDE.md
 .claude/
 .vscode/
 .idea/

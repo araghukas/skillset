@@ -43,6 +43,17 @@ jobs:
       - name: Build
         run: make build
 
+  scripts:
+    name: Onboarding scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # Also fails when onboard-claude.sh's embedded copy of
+      # skillset-hook.sh has drifted from the real file.
+      - name: Test hook script and settings merge
+        run: make test-scripts
+
   helm:
     name: Helm chart
     runs-on: ubuntu-latest

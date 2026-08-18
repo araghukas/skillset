@@ -13,7 +13,7 @@ import (
 // GitTreeBackend is a Backend implementation that reads files out of a
 // single git commit's tree rather than a live filesystem. It lets
 // skillparse.Load resolve a skill "as of" an arbitrary ref (a branch, a
-// proposal, a raw commit) through the exact same parsing/validation path
+// suggestion, a raw commit) through the exact same parsing/validation path
 // FSBackend feeds the static registry with.
 type GitTreeBackend struct {
 	tree *object.Tree

@@ -4,26 +4,28 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"syscall"
 	"time"
 
-	skillsv1 "github.com/araghukas/skillset/gen/skills/v1"
+	"github.com/araghukas/skillset/internal/clientguide"
 	"github.com/araghukas/skillset/internal/evidence"
-	"github.com/araghukas/skillset/internal/evidenceserver"
+	"github.com/araghukas/skillset/internal/evidencetools"
 	"github.com/araghukas/skillset/internal/githubpr"
 	"github.com/araghukas/skillset/internal/gitrepo"
-	"github.com/araghukas/skillset/internal/proposals"
-	"github.com/araghukas/skillset/internal/proposalserver"
+	"github.com/araghukas/skillset/internal/mcphttp"
 	"github.com/araghukas/skillset/internal/registryconfig"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/health"
-	"google.golang.org/grpc/health/grpc_health_v1"
-	"google.golang.org/grpc/reflection"
+	"github.com/araghukas/skillset/internal/submit"
+	"github.com/araghukas/skillset/internal/suggestions"
+	"github.com/araghukas/skillset/internal/suggestiontools"
+	"github.com/araghukas/skillset/internal/toollog"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+// version is stamped at build time; unset in `go run`/`go test` builds.
+var version = "dev"
 
 func main() {
 	if err := run(); err != nil {
@@ -52,65 +54,102 @@ func run() error {
 	}
 	slog.Info("opened skills repo",
 		"dir", cfg.RepoDir, "base_branch", cfg.SkillsRepoBaseBranch, "github_auth_mode", cfg.GitHubAuthMode)
-	if !cfg.SubmitProposalEnabled {
-		slog.Warn("SubmitProposal is disabled: GitHub auth not configured or SUBMIT_PROPOSAL_ENABLED=false")
-	}
-
-	svc := proposals.New(repo, cfg.SkillsSubPath, cfg.MaxFileContentBytes)
+	svc := suggestions.New(repo, cfg.SkillsSubPath, cfg.MaxFileContentBytes)
 	gh := githubpr.New(cfg.GitHubAPIBaseURL, cfg.GitHubOwner, cfg.GitHubRepo, cfg.GitHubAuth)
 
-	if cfg.AutoSubmitEndorsements > 0 {
-		slog.Warn("auto-submission is enabled: proposals corroborated by enough agents will open pull requests unprompted",
+	// Corroboration is the only thing that opens a pull request, so both the
+	// threshold and the credential have to be in place for a suggestion to
+	// ever leave this pod. Each missing half is worth saying out loud at
+	// startup: the alternative is suggestions silently accumulating on a
+	// volume nobody is watching.
+	switch {
+	case cfg.AutoSubmitEndorsements <= 0:
+		slog.Warn("auto-submission is off: suggestions will accumulate as local branches and are never pushed",
+			"hint", "set AUTO_SUBMIT_ENDORSEMENTS")
+	case !cfg.SubmitConfigured:
+		slog.Warn("auto-submission is configured but no pull request can be opened: GitHub credential, owner, or repo is missing",
+			"threshold", cfg.AutoSubmitEndorsements)
+	default:
+		slog.Info("auto-submission is enabled: suggestions corroborated by enough agents open pull requests",
 			"threshold", cfg.AutoSubmitEndorsements)
 	}
 
 	go refreshBaseLoop(ctx, repo, cfg.FetchInterval)
 
-	healthSrv := health.NewServer()
-	healthSrv.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
+	submitter := submit.New(svc, gh, cfg.SkillsRepoBaseBranch)
 
-	lis, err := net.Listen("tcp", cfg.GRPCAddr)
-	if err != nil {
-		return err
-	}
-
-	grpcServer := grpc.NewServer(
-		grpc.MaxRecvMsgSize(cfg.GRPCMaxRecvMsgSizeBytes),
-		grpc.MaxSendMsgSize(cfg.GRPCMaxSendMsgSizeBytes),
-	)
-	skillsv1.RegisterProposalServiceServer(grpcServer, proposalserver.New(
-		svc, gh, cfg.SkillsRepoBaseBranch, cfg.SubmitProposalEnabled, cfg.AutoSubmitEndorsements))
-
-	// EvidenceService is optional: without it the registry is still a
-	// complete proposal path, just one whose pull requests arrive without
-	// the field data that motivated them.
+	// Evidence collection is optional: without it the registry is still a
+	// complete suggestion path, just one whose pull requests arrive without
+	// the field data that motivated them. The evidence tools are only
+	// registered below when a store is opened, so a disabled configuration
+	// means those tools are simply absent from tools/list.
+	var store *evidence.Store
 	if cfg.EvidenceEnabled {
-		store, err := openEvidence(ctx, cfg)
+		store, err = openEvidence(ctx, cfg)
 		if err != nil {
 			return err
 		}
 		defer store.Close()
 
-		skillsv1.RegisterEvidenceServiceServer(grpcServer,
-			evidenceserver.New(store, svc, cfg.EvidenceVerifyCommits))
-
 		go retentionLoop(ctx, store, cfg.EvidenceRollupInterval, cfg.EvidenceRetention)
 		go backupLoop(ctx, store, cfg.EvidenceBackupPath, cfg.EvidenceBackupInterval)
 	} else {
-		slog.Info("EvidenceService is disabled; no outcome reports will be collected")
+		slog.Info("evidence collection is disabled; no outcome reports will be collected")
 	}
 
-	grpc_health_v1.RegisterHealthServer(grpcServer, healthSrv)
-	reflection.Register(grpcServer)
+	guideAppendix := repoConfigSection(cfg)
 
-	go func() {
-		<-ctx.Done()
-		slog.Info("shutdown signal received, draining connections")
-		grpcServer.GracefulStop()
-	}()
+	srv := mcp.NewServer(
+		&mcp.Implementation{Name: "skillsd-registry", Version: version},
+		&mcp.ServerOptions{
+			Instructions: clientguide.Instructions(guideAppendix),
+			// Suppress the SDK's default advertisement of a "logging"
+			// capability, which this server does not implement.
+			Capabilities: &mcp.ServerCapabilities{},
+		},
+	)
+	srv.AddReceivingMiddleware(toollog.Middleware)
+	suggestiontools.Add(srv, suggestiontools.Deps{
+		Suggestions:         svc,
+		Submitter:           submitter,
+		SubmitConfigured:    cfg.SubmitConfigured,
+		AutoSubmitThreshold: cfg.AutoSubmitEndorsements,
+		DefaultMaxBytes:     cfg.MaxResultBytes,
+		ClientGuideAppendix: guideAppendix,
+	})
+	if store != nil {
+		evidencetools.Add(srv, evidencetools.Deps{
+			Store:    store,
+			Resolver: svc,
+			Verify:   cfg.EvidenceVerifyCommits,
+		})
+	}
 
-	slog.Info("skillsd-registry listening", "addr", cfg.GRPCAddr)
-	return grpcServer.Serve(lis)
+	return mcphttp.Serve(ctx, srv, mcphttp.Options{
+		Addr:                cfg.HTTPAddr,
+		MaxRequestBodyBytes: cfg.MaxRequestBodyBytes,
+	})
+}
+
+// repoConfigSection builds the "Repository configuration" section appended
+// to the client guide, naming the two repos/branches a suggestion passes
+// through - the repo skills are read from and forked from, and the repo
+// corroborated suggestions open pull requests against. The two are usually
+// the same repo, but nothing enforces that (GitHubOwner/GitHubRepo can name
+// a different repo than SkillsRepoURL points to), so both are spelled out
+// rather than assumed identical.
+func repoConfigSection(cfg registryconfig.Config) string {
+	prRepo := "not configured - no pull requests are opened"
+	if cfg.GitHubOwner != "" && cfg.GitHubRepo != "" {
+		prRepo = fmt.Sprintf("https://github.com/%s/%s", cfg.GitHubOwner, cfg.GitHubRepo)
+	}
+	return fmt.Sprintf(
+		"## Repository configuration\n\n"+
+			"- Skills are read from, and suggestions are forked from, %s on branch %q.\n"+
+			"- Corroborated suggestions open pull requests against %s, targeting branch %q.\n",
+		cfg.SkillsRepoURL, cfg.SkillsRepoBaseBranch,
+		prRepo, cfg.SkillsRepoBaseBranch,
+	)
 }
 
 // openEvidence opens the outcome-report database, creating its parent

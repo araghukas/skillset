@@ -3,7 +3,7 @@
 //
 // This is the one piece of skillset that is not derived from git.
 //
-// A skill's content, a proposal, its endorsements, its submission - all of
+// A skill's content, a suggestion, its endorsements, its submission - all of
 // those are recomputable from the repository, and losing this component's
 // volume costs nothing but a re-clone. Outcome reports are different: they
 // are primary observations of how a skill behaved in the field, they exist
@@ -24,9 +24,17 @@ import (
 	_ "modernc.org/sqlite" // pure-Go driver: the binaries build CGO_ENABLED=0
 )
 
-// Verdict is how one skill fared in one session. The values mirror
-// skills.v1.Verdict; the store keeps its own type so the schema doesn't
-// shift underneath it if the proto's numbering ever changes.
+// Verdict is how one skill fared in the turn that used it.
+//
+// The values are deliberately observable outcomes rather than a
+// satisfaction rating: an agent's opinion of whether a skill was "good" is
+// noise, but whether it had to work around the skill, or the skill's
+// instructions were contradicted by reality, is a fact about the work.
+// Each value also implies a different repair.
+//
+// The integers are storage and are frozen - they are written to SQLite and
+// form part of the signal_rollup primary key. The wire form is the string
+// in verdict.go. See TestVerdictIntegersAreFrozen.
 type Verdict int
 
 const (
@@ -52,7 +60,7 @@ func (v Verdict) isDefect() bool {
 	}
 }
 
-// SkillOutcome is how one skill fared within one reported session.
+// SkillOutcome is how one skill fared within one report.
 type SkillOutcome struct {
 	SkillName   string
 	SkillCommit string
@@ -60,7 +68,9 @@ type SkillOutcome struct {
 	Note        string
 }
 
-// Report is one agent session's outcome for every skill it used.
+// Report is one agent's outcome for every skill it used in one turn. A
+// session files as many reports as it had turns that used a skill, each
+// with its own ReportID and the same SessionID.
 type Report struct {
 	ReportID   string
 	AgentID    string
@@ -69,7 +79,7 @@ type Report struct {
 	Skills     []SkillOutcome
 }
 
-// StoredOutcome is a single (session, skill) observation read back out.
+// StoredOutcome is a single (report, skill) observation read back out.
 type StoredOutcome struct {
 	ReportID    string
 	AgentID     string
@@ -83,9 +93,12 @@ type StoredOutcome struct {
 
 // Signal is the aggregate for one (skill, commit) pair.
 type Signal struct {
-	SkillName         string
-	SkillCommit       string
-	ReportedSessions  int64
+	SkillName   string
+	SkillCommit string
+
+	// ReportCount is how many reports carried this (skill, commit) pair.
+	ReportCount int64
+
 	VerdictCounts     map[Verdict]int64
 	DefectRate        float64
 	NotApplicableRate float64
@@ -176,7 +189,7 @@ func Open(ctx context.Context, path string) (*Store, error) {
 // Close releases the database handle.
 func (s *Store) Close() error { return s.db.Close() }
 
-// RecordReport stores one session's outcomes, returning false if this
+// RecordReport stores one turn's outcomes, returning false if this
 // report_id was already present.
 //
 // Idempotency is the whole point of the caller-supplied report ID: the
@@ -251,10 +264,10 @@ func (s *Store) RecordReport(ctx context.Context, r Report) (bool, error) {
 // reads the same before and after retention has run over it.
 const listSignalsQuery = `
 SELECT skill_name, skill_commit, verdict,
-       SUM(sessions), MIN(first_at), MAX(last_at)
+       SUM(reports), MIN(first_at), MAX(last_at)
 FROM (
     SELECT rs.skill_name, rs.skill_commit, rs.verdict,
-           COUNT(*) AS sessions,
+           COUNT(*) AS reports,
            MIN(r.reported_at) AS first_at,
            MAX(r.reported_at) AS last_at
     FROM report_skill rs
@@ -271,13 +284,13 @@ GROUP BY skill_name, skill_commit, verdict
 `
 
 // ListSignals aggregates reports into one Signal per (skill, commit),
-// optionally filtered to one skill and to rows with at least
-// minReportedSessions behind them.
+// optionally filtered to one skill and to rows with at least minReports
+// behind them.
 //
 // Results are ordered by skill name, then by first observation, so
 // successive commits of one skill read in the order they were seen and a
 // rising defect rate is visible without further work.
-func (s *Store) ListSignals(ctx context.Context, skillName string, minReportedSessions int) ([]Signal, error) {
+func (s *Store) ListSignals(ctx context.Context, skillName string, minReports int) ([]Signal, error) {
 	query := listSignalsQuery
 	var args []any
 	if skillName != "" {
@@ -314,7 +327,7 @@ func (s *Store) ListSignals(ctx context.Context, skillName string, minReportedSe
 		}
 
 		sig.VerdictCounts[Verdict(verdict)] += count
-		sig.ReportedSessions += count
+		sig.ReportCount += count
 		if t := time.Unix(firstAt, 0).UTC(); t.Before(sig.FirstReportedAt) {
 			sig.FirstReportedAt = t
 		}
@@ -328,7 +341,7 @@ func (s *Store) ListSignals(ctx context.Context, skillName string, minReportedSe
 
 	out := make([]Signal, 0, len(byKey))
 	for _, sig := range byKey {
-		if minReportedSessions > 0 && sig.ReportedSessions < int64(minReportedSessions) {
+		if minReports > 0 && sig.ReportCount < int64(minReports) {
 			continue
 		}
 		var defects, notApplicable int64
@@ -340,9 +353,9 @@ func (s *Store) ListSignals(ctx context.Context, skillName string, minReportedSe
 				notApplicable += n
 			}
 		}
-		if sig.ReportedSessions > 0 {
-			sig.DefectRate = float64(defects) / float64(sig.ReportedSessions)
-			sig.NotApplicableRate = float64(notApplicable) / float64(sig.ReportedSessions)
+		if sig.ReportCount > 0 {
+			sig.DefectRate = float64(defects) / float64(sig.ReportCount)
+			sig.NotApplicableRate = float64(notApplicable) / float64(sig.ReportCount)
 		}
 		out = append(out, *sig)
 	}
@@ -357,7 +370,7 @@ func (s *Store) ListSignals(ctx context.Context, skillName string, minReportedSe
 }
 
 // ListReports returns the individual observations behind a signal,
-// most-recent-first, so an agent about to propose a fix can read what
+// most-recent-first, so an agent about to suggest a fix can read what
 // actually went wrong instead of inferring it from a rate.
 func (s *Store) ListReports(ctx context.Context, f ReportFilter) ([]StoredOutcome, error) {
 	query := `
@@ -415,7 +428,7 @@ func (s *Store) ListReports(ctx context.Context, f ReportFilter) ([]StoredOutcom
 // This is lossy by design: the aggregate counts survive forever, the notes
 // and individual report IDs do not. Keeping raw rows indefinitely would
 // grow the volume without bound for the sake of prose nobody reads after
-// the proposal it motivated has merged.
+// the suggestion it motivated has merged.
 func (s *Store) Rollup(ctx context.Context, cutoff time.Time) (int64, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {

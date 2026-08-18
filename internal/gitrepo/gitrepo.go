@@ -1,14 +1,15 @@
 // Package gitrepo wraps a single git working copy used by skillsd-registry:
-// open-or-clone it, keep its base branch fresh, commit agent-proposed file
+// open-or-clone it, keep its base branch fresh, commit agent-suggested file
 // changes onto a branch, diff/log a branch against base, and push a branch
-// upstream. It knows nothing about proposals, agents, or skills - that
-// naming and orchestration lives in internal/proposals.
+// upstream. It knows nothing about suggestions, agents, or skills - that
+// naming and orchestration lives in internal/suggestions.
 package gitrepo
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"path"
 	"sort"
 	"strings"
@@ -82,8 +83,10 @@ func Open(ctx context.Context, dir, cloneURL, baseBranch string, tokens TokenSou
 			SingleBranch:  true,
 		})
 		if err != nil {
+			slog.Error("cloning repo failed", "url", cloneURL, "dir", dir, "branch", baseBranch, "error", err)
 			return nil, fmt.Errorf("gitrepo: cloning %s into %s: %w", cloneURL, dir, err)
 		}
+		slog.Info("cloned repo", "url", cloneURL, "dir", dir, "branch", baseBranch)
 	case err != nil:
 		return nil, fmt.Errorf("gitrepo: opening %s: %w", dir, err)
 	}
@@ -112,7 +115,7 @@ func (r *Repo) auth(ctx context.Context) (transport.AuthMethod, error) {
 	return &githttp.BasicAuth{Username: "x-access-token", Password: token}, nil
 }
 
-// BaseBranch returns the name of the branch proposals and PRs target.
+// BaseBranch returns the name of the branch suggestions and PRs target.
 func (r *Repo) BaseBranch() string {
 	return r.baseBranch
 }
@@ -124,7 +127,7 @@ func (r *Repo) BaseHead() (plumbing.Hash, error) {
 
 // RefreshBase fetches the base branch from origin and fast-forwards the
 // local base branch ref to match. Called on a background timer and
-// opportunistically before forking a new proposal branch.
+// opportunistically before forking a new suggestion branch.
 func (r *Repo) RefreshBase(ctx context.Context) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -143,6 +146,7 @@ func (r *Repo) RefreshBase(ctx context.Context) error {
 	if err != nil && !errors.Is(err, git.NoErrAlreadyUpToDate) {
 		return fmt.Errorf("gitrepo: fetching %s: %w", r.baseBranch, err)
 	}
+	slog.Info("fetched base branch", "branch", r.baseBranch, "up_to_date", errors.Is(err, git.NoErrAlreadyUpToDate))
 
 	remoteRef, err := r.repo.Reference(plumbing.NewRemoteReferenceName("origin", r.baseBranch), true)
 	if err != nil {
@@ -170,9 +174,9 @@ func (r *Repo) ResolveRef(ref string) (plumbing.Hash, error) {
 }
 
 // MergeBase returns the best common ancestor of a and b - the commit a
-// proposal branch actually forked from, which may lag behind the base
+// suggestion branch actually forked from, which may lag behind the base
 // branch's current tip if it has advanced since. Callers use this rather
-// than BaseHead() when diffing/logging an existing proposal branch, since
+// than BaseHead() when diffing/logging an existing suggestion branch, since
 // using the current tip there would walk clean past the fork point.
 func (r *Repo) MergeBase(a, b plumbing.Hash) (plumbing.Hash, error) {
 	commitA, err := r.repo.CommitObject(a)
@@ -262,6 +266,7 @@ func (r *Repo) CommitOnBranch(branch string, fromBase plumbing.Hash, files []Fil
 	if err != nil {
 		return plumbing.ZeroHash, fmt.Errorf("gitrepo: committing to %q: %w", branch, err)
 	}
+	slog.Info("committed to branch", "branch", branch, "commit", hash.String(), "files", len(files))
 	return hash, nil
 }
 
@@ -306,7 +311,7 @@ func (r *Repo) Diff(from, to plumbing.Hash) (string, error) {
 }
 
 // Log returns commits reachable from to, back to (but excluding) from,
-// oldest-parent-first traversal assumed linear - true here since proposal
+// oldest-parent-first traversal assumed linear - true here since suggestion
 // branches are only ever appended to, never merged into.
 func (r *Repo) Log(from, to plumbing.Hash) ([]CommitInfo, error) {
 	cur, err := r.repo.CommitObject(to)
@@ -360,8 +365,10 @@ func (r *Repo) Push(ctx context.Context, branch string, alsoRefs ...string) erro
 		RefSpecs:   refSpecs,
 	})
 	if err != nil && !errors.Is(err, git.NoErrAlreadyUpToDate) {
+		slog.Error("pushing branch failed", "branch", branch, "also_refs", alsoRefs, "error", err)
 		return fmt.Errorf("gitrepo: pushing %q: %w", branch, err)
 	}
+	slog.Info("pushed branch", "branch", branch, "also_refs", alsoRefs, "up_to_date", errors.Is(err, git.NoErrAlreadyUpToDate))
 	return nil
 }
 
@@ -449,7 +456,7 @@ func (r *Repo) Annotations(prefix string) ([]Annotation, error) {
 
 // LineRange is a half-open [Start, End) interval of 1-indexed line numbers
 // on the *base* side of a diff. A pure insertion has Start == End: it
-// occupies no base lines but still marks a position two proposals can
+// occupies no base lines but still marks a position two suggestions can
 // collide at.
 type LineRange struct {
 	Start int
@@ -461,7 +468,7 @@ type LineRange struct {
 //
 // This is what clustering compares. go-git has no merge-tree, so rather
 // than attempting a real three-way merge to detect conflicts, overlap of
-// these ranges stands in for it: two proposals rewriting the same lines are
+// these ranges stands in for it: two suggestions rewriting the same lines are
 // answering the same question, whether or not git would call it a textual
 // conflict. It is the cheaper signal and arguably the more meaningful one,
 // since edits that merge cleanly can still be competing answers.

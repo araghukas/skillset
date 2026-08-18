@@ -3,21 +3,6 @@
 Both components share one chart, [charts/skillsd](../charts/skillsd), and render
 as independent Deployments.
 
-```
-charts/skillsd/
-├── Chart.yaml
-├── values.yaml
-└── templates/
-    ├── deployment.yaml           # skillsd: skillsd-init init container + read-only main container
-    ├── service.yaml              # skillsd's ClusterIP
-    ├── deployment-registry.yaml  # skillsd-registry (guarded by registry.enabled)
-    ├── service-registry.yaml     # skillsd-registry's ClusterIP
-    ├── pvc-registry.yaml         # repo-data volume
-    ├── pvc-evidence.yaml         # evidence-data volume (guarded by registry.evidence.persistence.enabled)
-    ├── serviceaccount.yaml
-    └── _helpers.tpl
-```
-
 ## Resource graph
 
 ```mermaid
@@ -84,7 +69,7 @@ Both components authenticate the same way — an HTTPS clone URL plus a credenti
 | Needs | `git clone` only | `git push` **and** the GitHub REST API (PR creation) |
 | Values | `skillsRepo.githubApp.*` / `skillsRepo.tokenSecret` | `registry.github.githubApp.*` / `registry.github.tokenSecret` |
 | Minimum permissions | `Contents: Read` | `Contents: Read and write` + `Pull requests: Read and write` |
-| If unset | Fine for a public repo — no auth needed | Runs propose-only: `ProposeChange`/`GetProposal`/etc. still work, `SubmitProposal` is disabled |
+| If unset | Fine for a public repo — no auth needed | All tools still work, but no pull request can ever open: suggestions stay as local branches |
 
 The chart itself enforces no scoping: it passes each component whatever
 credential you name, and every permission boundary lives on GitHub's side, in
@@ -145,10 +130,11 @@ For local dev, the Tiltfile creates them for you from gitignored files; see
 | Value | Default | Env var | Description |
 |---|---|---|---|
 | `replicaCount` | `2` | — | Read-fleet replica count |
-| `image.repository` / `.tag` | `skillsd` / `latest` | — | Image for the `skillsd` container |
-| `grpcAddr` | `:8080` | `GRPC_ADDR` | gRPC listen address |
+| `image.repository` / `.tag` | `ghcr.io/araghukas/skillsd` / `""` | — | Image for the `skillsd` container; empty `tag` falls back to the chart's `appVersion` |
+| `httpAddr` | `:8080` | `HTTP_ADDR` | MCP (Streamable HTTP) listen address |
 | `logLevel` | `info` | `LOG_LEVEL` | Minimum slog level |
-| `grpcMaxRecvMsgSizeMiB` / `grpcMaxSendMsgSizeMiB` | `8` / `8` | `GRPC_MAX_{RECV,SEND}_MSG_SIZE_BYTES` | Per-message gRPC size caps |
+| `maxRequestBodyMiB` | `8` | `MAX_REQUEST_BODY_BYTES` | Cap on a single incoming MCP request body |
+| `maxResultKiB` | `256` | `MAX_RESULT_BYTES` | Cap on context-file bytes a single `get_skill` call returns — note the unit is **KiB**, not MiB |
 | `service.type` / `.port` | `ClusterIP` / `8080` | — | `skillsd`'s Service |
 | `skillsRepo.url` | `""` | `SKILLS_REPO_URL` (init container) | HTTPS clone URL |
 | `skillsRepo.branch` | `main` | `SKILLS_REPO_BRANCH` (init container) | Branch shallow-cloned (depth 1) |
@@ -167,24 +153,24 @@ For local dev, the Tiltfile creates them for you from gitignored files; see
 | Value | Default | Env var | Description |
 |---|---|---|---|
 | `registry.enabled` | `true` | — | Renders the registry's Deployment/Service/PVCs at all |
-| `registry.image.repository` / `.tag` | `skillsd` / `latest` | — | Same image, different entrypoint (`/skillsd-registry`) |
-| `registry.grpcAddr` | `:8081` | `GRPC_ADDR` | gRPC listen address |
+| `registry.image.repository` / `.tag` | `ghcr.io/araghukas/skillsd` / `""` | — | Same image, different entrypoint (`/skillsd-registry`); empty `tag` falls back to the chart's `appVersion` |
+| `registry.httpAddr` | `:8081` | `HTTP_ADDR` | MCP (Streamable HTTP) listen address |
 | `registry.service.type` / `.port` | `ClusterIP` / `8081` | — | Registry's Service |
 | `registry.fetchInterval` | `5m` | `FETCH_INTERVAL` | Background re-fetch of the base branch |
-| `registry.grpcMaxRecvMsgSizeMiB` / `.grpcMaxSendMsgSizeMiB` | `8` / `8` | `GRPC_MAX_{RECV,SEND}_MSG_SIZE_BYTES` | Per-message gRPC size caps |
-| `registry.maxFileContentSizeMiB` | `1` | `MAX_FILE_CONTENT_BYTES` | Cap on a single proposed file's content |
+| `registry.maxRequestBodyMiB` | `8` | `MAX_REQUEST_BODY_BYTES` | Cap on a single incoming MCP request body (a whole `record_suggestion` call) |
+| `registry.maxResultKiB` | `256` | `MAX_RESULT_BYTES` | Cap on bytes a single `get_skill_at_ref` or `get_suggestion` call returns — **KiB**, not MiB |
+| `registry.maxFileContentSizeMiB` | `1` | `MAX_FILE_CONTENT_BYTES` | Cap on a single suggested file's content |
 | `registry.repoDir` | `/var/lib/skillsd-registry` | `REPO_DIR` | Working copy path (on `repo-data`) |
 | `registry.persistence.size` / `.storageClassName` | `1Gi` / `""` | — | `repo-data` PVC sizing |
 | `registry.skillsRepo.url` | `""` | `SKILLS_REPO_URL` | Clone URL — usually the same repo as `skillsRepo.url`, configured with its own credential |
-| `registry.skillsRepo.baseBranch` | `main` | `SKILLS_REPO_BASE_BRANCH` | Branch proposals fork from / PRs target |
+| `registry.skillsRepo.baseBranch` | `main` | `SKILLS_REPO_BASE_BRANCH` | Branch suggestions fork from / PRs target |
 | `registry.skillsRepo.subPath` | `skills` | `SKILLS_SUBPATH` | Subdirectory holding skill directories |
-| `registry.submitProposalEnabled` | `true` | `SUBMIT_PROPOSAL_ENABLED` | Gates the push+PR step in `SubmitProposal` |
-| `registry.autoSubmitEndorsements` | `0` | `AUTO_SUBMIT_ENDORSEMENTS` | Corroboration count that auto-opens a PR — off by default, see [skillsd-registry.md](skillsd-registry.md#consolidation-how-n-agents-produce-one-pull-request) |
+| `registry.autoSubmitEndorsements` | `2` | `AUTO_SUBMIT_ENDORSEMENTS` | Corroboration count that opens a PR — the only path to one; `0` keeps suggestions local, see [skillsd-registry.md](skillsd-registry.md#consolidation-how-n-agents-produce-one-pull-request). `2` is this chart's default, set explicitly in `values.yaml` — the binary's own fallback when the env var is absent entirely (e.g. run outside the chart) is `0` |
 | `registry.github.owner` / `.repo` | `""` / `""` | `GITHUB_OWNER` / `GITHUB_REPO` | Target repo for pull requests |
 | `registry.github.githubApp.appId` | `""` | `GITHUB_APP_ID` | App client ID or numeric app ID |
 | `registry.github.githubApp.installationId` | `""` | `GITHUB_APP_INSTALLATION_ID` | Installation to act as |
 | `registry.github.githubApp.privateKeySecret` | `""` | — | Secret (key `private-key.pem`), mounted at `/etc/github-app` |
-| `registry.github.tokenSecret` | `""` | `GITHUB_TOKEN` | Secret (key `token`); no credential at all ⇒ propose-only mode |
+| `registry.github.tokenSecret` | `""` | `GITHUB_TOKEN` | Secret (key `token`); no credential at all ⇒ suggestions are never pushed |
 | `registry.github.apiBaseURL` | `https://api.github.com` | `GITHUB_API_BASE_URL` | Override for GitHub Enterprise (and the local Gitea stand-in) |
 | `registry.resources` | `{}` | — | Pod resource requests/limits |
 
@@ -192,7 +178,7 @@ For local dev, the Tiltfile creates them for you from gitignored files; see
 
 | Value | Default | Env var | Description |
 |---|---|---|---|
-| `registry.evidence.enabled` | `true` | `EVIDENCE_ENABLED` | Serves `EvidenceService` at all |
+| `registry.evidence.enabled` | `true` | `EVIDENCE_ENABLED` | Registers the evidence tools (`report_outcome`, `list_skill_signals`, `list_outcome_reports`) at all — disabled, they're absent from `tools/list` |
 | `registry.evidence.dbPath` | `/var/lib/skillsd-evidence/evidence.db` | `EVIDENCE_DB_PATH` | SQLite file, on `evidence-data` |
 | `registry.evidence.verifyCommits` | `true` | `EVIDENCE_VERIFY_COMMITS` | Reject reports naming a skill/commit the repo doesn't contain |
 | `registry.evidence.retention` | `2160h` (90d) | `EVIDENCE_RETENTION` | Age at which raw reports roll up into aggregates and are deleted; `0` disables |

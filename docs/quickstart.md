@@ -22,7 +22,8 @@ registry:
 helm install skillsd charts/skillsd -f values.yaml
 kubectl get pods -l app.kubernetes.io/instance=skillsd
 kubectl port-forward svc/skillsd 8080:8080
-grpcurl -plaintext localhost:8080 list          # confirm reflection + SkillService are up
+curl -fsS localhost:8080/healthz                # confirm the pod is up
+claude mcp add --transport http skillsd http://localhost:8080/mcp
 ```
 
 A private repo needs credentials. The recommended route is a GitHub App:
@@ -64,7 +65,7 @@ skillsRepo:
 
 ## 2. Add the write path (optional)
 
-Enable `skillsd-registry` once agents need to propose changes and/or report
+Enable `skillsd-registry` once agents need to suggest changes and/or report
 outcomes. It needs its own, more privileged credential: `Contents: Read and
 write` plus `Pull requests: Read and write`. Keeping it separate from step 1's
 is the point — the read fleet has no business holding something that can push.
@@ -74,6 +75,11 @@ registry:
   enabled: true
   skillsRepo:
     url: "https://github.com/<org>/<skills-repo>.git"
+  # autoSubmitEndorsements is how many agents must independently suggest the
+  # same fix before a PR opens; omitted here, so it takes the chart's own
+  # default of 2. Set it explicitly if you want a different threshold.
+  # A value of 0 means suggestions never auto-push.
+  autoSubmitEndorsements: 2
   github:
     owner: "<org>"
     repo: "<skills-repo>"
@@ -100,7 +106,8 @@ registry:
 ```bash
 helm upgrade skillsd charts/skillsd -f values.yaml
 kubectl port-forward svc/skillsd-registry 8081:8081
-grpcurl -plaintext localhost:8081 list skills.v1.ProposalService
+curl -fsS localhost:8081/healthz
+claude mcp add --transport http skillsd-registry http://localhost:8081/mcp
 ```
 
 Full value reference: [helm-chart.md](helm-chart.md). Storage/backup
@@ -108,8 +115,29 @@ implications of turning this on: [data-stores.md](data-stores.md).
 
 ## 3. Point an agent at it
 
-This is the only integration step — there's no SDK to install. An agent needs
-exactly two things: an endpoint, and the instruction to onboard itself.
+The easiest option is to use an onboarding script, e.g. for Claude Code,
+[scripts/onboard-claude.sh](../scripts/onboard-claude.sh):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/araghukas/skillset/main/scripts/onboard-claude.sh | bash -s -- \
+  --scope user \
+  --skillsd-url http://skillsd.<namespace>.svc.cluster.local:8080/mcp \
+  --registry-url http://skillsd-registry.<namespace>.svc.cluster.local:8081/mcp
+```
+
+This registers the `skillsd` and `skillsd-registry` MCP servers, pre-approves
+all of their tools in the agent's permissions, and assigns the agent a stable
+`SKILLSET_AGENT_ID` — by editing `.claude/settings.json` and `.mcp.json` in the
+directory where it's invoked.
+
+It also installs hooks that hold the agent to the reporting contract: a turn
+that loads a skill is blocked from ending until it has called `report_outcome`
+for it, with the skill's `commit` handed back so the report can name a version.
+Pass `--no-hooks` to skip them; they're skipped anyway when no
+`--registry-url` is configured, since there's nowhere to report to.
+
+The hooks are [scripts/skillset-hook.sh](../scripts/skillset-hook.sh), which
+the onboarding script carries a copy of and writes to `~/.claude/skillset/`.
 
 ```mermaid
 sequenceDiagram
@@ -117,35 +145,22 @@ sequenceDiagram
     participant Agent as AI Agent
     participant Read as skillsd :8080
     participant Write as skillsd-registry :8081
+    participant Hook as reporting hooks
 
-    Op->>Agent: "skillsd is at skillsd.<ns>.svc:8080\n(and skillsd-registry at :8081, if deployed)"
-    Agent->>Read: gRPC reflection: list services
-    Read-->>Agent: SkillService, ProposalService, EvidenceService
-    Agent->>Read: GetClientGuide({})
-    Read-->>Agent: onboarding SKILL.md — every RPC,<br/>when to call it, what to send
-    Note over Agent: fully onboarded — no further<br/>docs, proto files, or SDK needed
-    Agent->>Read: ListSkills / GetSkill ...
-    Agent->>Write: ProposeChange / ReportOutcome ...
+    Op->>Agent: onboarding script (registers servers + permissions + hooks)
+    Agent->>Read: initialize
+    Read-->>Agent: instructions (onboarding guide) + tools/list
+    Note over Agent: fully onboarded — no further<br/>docs, schema files, or SDK needed,<br/>no first-use permission prompts
+    Agent->>Read: list_skills / get_skill ...
+    Hook->>Hook: remember skill@commit as owed
+    Agent->>Write: record_suggestion / report_outcome ...
+    Hook->>Agent: turn ends — block until every skill is reported
 ```
-
-In practice, "point an agent at it" means putting one or two lines in whatever
-system prompt or tool config wires the agent up — something like:
-
-```
-You have access to a skillsd gRPC endpoint at skillsd.<namespace>.svc.cluster.local:8080
-(and, if available, skillsd-registry at :8081). On first use, call
-SkillService.GetClientGuide (no arguments) to learn the full API — which RPCs
-to call, when, and with what fields. Do this before assuming any RPC's shape.
-```
-
-Everything past that point is between the agent and `GetClientGuide` — that
-guide (served by the running binary itself, not this repo) is the actual API
-reference.
 
 ## 4. Local development
 
 For iterating on `skillset` itself (not just deploying it), `make dev` brings up
 a local `kind` cluster with Tilt handling build/deploy/live-reload — see the
 root [README.md](../README.md#local-development) for prerequisites and
-[local/README.md](../local/README.md) for a full `grpcurl` walkthrough against
+[local/README.md](../local/README.md) for a full MCP walkthrough against
 the local instance.
