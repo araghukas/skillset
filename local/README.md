@@ -239,7 +239,7 @@ carries the change, which the error points out. Use `files` with whole file
 contents only for a file that doesn't exist yet.
 
 Every other tool follows the same `tools/call` shape with its own
-`name`/`arguments` — `get_suggestion`, `list_suggestions`,
+`name`/`arguments` — `endorse_suggestion`, `get_suggestion`, `list_suggestions`,
 `list_suggestion_clusters`, and (if evidence collection is enabled)
 `report_outcome`, `list_outcome_reports`, `list_skill_signals`. Call
 `get_client_guide` on either server for the full workflow each tool expects —

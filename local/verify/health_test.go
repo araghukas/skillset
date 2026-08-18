@@ -80,7 +80,8 @@ func TestToolsListNamesExpectedTools(t *testing.T) {
 		session := connect(t, registryAddr())
 		got := toolNames(t, session)
 		for _, want := range []string{
-			"record_suggestion", "list_suggestions", "get_suggestion",
+			"record_suggestion", "endorse_suggestion", "list_suggestions",
+			"get_suggestion",
 			"list_suggestion_clusters", "get_skill_at_ref",
 			"get_client_guide",
 		} {
