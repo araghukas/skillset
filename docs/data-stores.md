@@ -19,7 +19,7 @@ flowchart LR
 
   GH -- "git clone --depth 1\n(init container, once)" --> SV1
   GH -- "fetch base branch\n(periodic)" --> RV
-  RV -- "push suggestion branch\n(at corroboration threshold)" --> GH
+  RV -- "push suggestion branch\n(at endorsement threshold)" --> GH
   Agents(["AI agents"]) -- "report_outcome" --> EV
   EV -. "VACUUM INTO\n(periodic snapshot)" .-> Backup[("backup target\n(operator-provided)")]
 ```
@@ -53,7 +53,7 @@ default 5 minutes) plus every open suggestion branch it has committed to locally
 **Caveat:** most of this volume is a cache — the base branch is trivially
 re-cloned. But a suggestion branch is pushed upstream only once it crosses
 `autoSubmitEndorsements`; below the threshold it exists **only** in this
-volume, and a suggestion no other agent ever corroborates stays here forever.
+volume, and a suggestion no other agent ever endorses stays here forever.
 Deleting `repo-data` loses those suggestions, not just a cache of them. In
 practice this is rarely worth backing up on its own merits (an agent can always
 re-suggest), but it's not *purely* a cache the way `skills-data` is — and the

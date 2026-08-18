@@ -2,9 +2,9 @@
 
 // Drives one full suggestion lifecycle against skillsd-registry's suggestion
 // tools: record a suggestion, inspect it, read the skill at that ref, list it
-// back, and cluster it. A second test drives enough independent agents at
-// identical content to cross the deployment's corroboration threshold and
-// confirms the pull request the registry opens on its own.
+// back, and cluster it. A second test has enough distinct agents endorse one
+// suggestion to cross the deployment's endorsement threshold and confirms
+// the pull request the registry opens on its own.
 package verify
 
 import (
@@ -25,7 +25,17 @@ type recordSuggestionOutput struct {
 			SHA string `json:"sha"`
 		} `json:"commits"`
 	} `json:"suggestion"`
-	Deduplicated  bool `json:"deduplicated"`
+	AutoSubmitted *struct {
+		PullRequestURL string `json:"pull_request_url"`
+	} `json:"auto_submitted"`
+}
+
+type endorseSuggestionOutput struct {
+	Suggestion struct {
+		Branch        string `json:"branch"`
+		HeadSHA       string `json:"head_sha"`
+		Corroboration int    `json:"corroboration"`
+	} `json:"suggestion"`
 	AutoSubmitted *struct {
 		PullRequestURL string `json:"pull_request_url"`
 	} `json:"auto_submitted"`
@@ -83,9 +93,6 @@ func TestFullSuggestionLifecycle(t *testing.T) {
 
 		if out.Suggestion.Branch != branch {
 			t.Errorf("suggestion branch = %q, want %q", out.Suggestion.Branch, branch)
-		}
-		if out.Deduplicated {
-			t.Error("first suggestion should not be deduplicated")
 		}
 		if out.Suggestion.Diff == "" {
 			t.Error("suggestion has an empty diff")
@@ -216,17 +223,17 @@ func TestFullSuggestionLifecycle(t *testing.T) {
 
 }
 
-// maxCorroboratingAgents bounds TestAutoSubmitAtThreshold. The threshold is
-// a server-side setting no tool exposes, so the test discovers it by adding
-// agents until a pull request appears. The bound keeps a deployment with a
-// deliberately high threshold - or none configured at all - from turning
+// maxEndorsingAgents bounds TestAutoSubmitAtThreshold. The threshold is a
+// server-side setting no tool exposes, so the test discovers it by adding
+// endorsers until a pull request appears. The bound keeps a deployment with
+// a deliberately high threshold - or none configured at all - from turning
 // into an unbounded loop.
-const maxCorroboratingAgents = 5
+const maxEndorsingAgents = 5
 
-// TestAutoSubmitAtThreshold drives identical content from a series of
-// distinct agents until the registry opens a pull request on its own. This
-// is the only path to a pull request, so it is the only place this harness
-// can observe one.
+// TestAutoSubmitAtThreshold records one suggestion and has a series of
+// distinct agents endorse it until the registry opens a pull request on its
+// own. This is the only path to a pull request, so it is the only place
+// this harness can observe one.
 //
 // A deployment that never crosses the threshold within the bound is a
 // legitimate shape - no credential configured, or a threshold set higher
@@ -238,32 +245,46 @@ func TestAutoSubmitAtThreshold(t *testing.T) {
 	content := fmt.Sprintf(
 		"---\nname: %s\ndescription: A minimal placeholder skill seeded by "+
 			"local/gitea-init.sh, edited by local/verify's auto-submit test at %s "+
-			"to exercise the corroboration threshold.\n---\n\n## When to use this skill\n\n"+
+			"to exercise the endorsement threshold.\n---\n\n## When to use this skill\n\n"+
 			"This is seed content for local dev only - edited by the verification test.\n",
 		skillName(), time.Now().UTC().Format(time.RFC3339))
 
+	res := callTool(t, session, "record_suggestion", map[string]any{
+		"skill_name":     skillName(),
+		"agent_id":       "verify-suggester",
+		"suggestion_id":  fmt.Sprintf("auto-submit-%d", stamp),
+		"commit_message": "verify: edit " + skillName(),
+		"files": []map[string]any{
+			{"file_path": "SKILL.md", "content": content},
+		},
+	})
+	if res.IsError {
+		t.Fatalf("record_suggestion failed: %s", contentText(res))
+	}
+	var recorded recordSuggestionOutput
+	decodeStructured(t, res, &recorded)
+
 	var prURL string
-	for i := 1; i <= maxCorroboratingAgents && prURL == ""; i++ {
-		agentID := fmt.Sprintf("verify-corroborator-%d", i)
-		res := callTool(t, session, "record_suggestion", map[string]any{
-			"skill_name":     skillName(),
-			"agent_id":       agentID,
-			"suggestion_id":  fmt.Sprintf("auto-submit-%d", stamp),
-			"commit_message": "verify: edit " + skillName(),
-			"files": []map[string]any{
-				{"file_path": "SKILL.md", "content": content},
-			},
+	if recorded.AutoSubmitted != nil {
+		// A threshold of 1 submits on the recording call itself.
+		prURL = recorded.AutoSubmitted.PullRequestURL
+	}
+
+	for i := 1; i <= maxEndorsingAgents && prURL == ""; i++ {
+		agentID := fmt.Sprintf("verify-endorser-%d", i)
+		res := callTool(t, session, "endorse_suggestion", map[string]any{
+			"branch":   recorded.Suggestion.Branch,
+			"agent_id": agentID,
+			"head_sha": recorded.Suggestion.HeadSHA,
 		})
 		if res.IsError {
-			t.Fatalf("record_suggestion as %s failed: %s", agentID, contentText(res))
+			t.Fatalf("endorse_suggestion as %s failed: %s", agentID, contentText(res))
 		}
-		var out recordSuggestionOutput
+		var out endorseSuggestionOutput
 		decodeStructured(t, res, &out)
 
-		// Every agent after the first suggests content that already exists,
-		// so it must land as corroboration rather than a branch of its own.
-		if i > 1 && !out.Deduplicated {
-			t.Fatalf("%s got its own branch for content that already existed", agentID)
+		if got, want := out.Suggestion.Corroboration, i+1; got != want {
+			t.Fatalf("%s: corroboration = %d, want %d", agentID, got, want)
 		}
 		if out.AutoSubmitted != nil {
 			if out.AutoSubmitted.PullRequestURL == "" {
@@ -275,9 +296,9 @@ func TestAutoSubmitAtThreshold(t *testing.T) {
 	}
 
 	if prURL == "" {
-		t.Skipf("no pull request opened within %d corroborating agents: this deployment has "+
+		t.Skipf("no pull request opened within %d endorsing agents: this deployment has "+
 			"autoSubmitEndorsements set higher, set to 0, or no GitHub credential configured",
-			maxCorroboratingAgents)
+			maxEndorsingAgents)
 	}
 
 	// Best-effort reachability check - not fatal, since the PR host may be

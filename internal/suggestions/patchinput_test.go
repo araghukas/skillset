@@ -57,43 +57,12 @@ func TestPatchProducesTheSameContentAsFullFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if fromPatch.Suggestion.ContentHash != fromFiles.Suggestion.ContentHash {
-		t.Errorf("content hash from patch = %s, from files = %s; want them equal",
-			fromPatch.Suggestion.ContentHash, fromFiles.Suggestion.ContentHash)
+	if fromPatch.Suggestion.Diff != fromFiles.Suggestion.Diff {
+		t.Errorf("diff from patch:\n%s\ndiff from files:\n%s\nwant them equal",
+			fromPatch.Suggestion.Diff, fromFiles.Suggestion.Diff)
 	}
 	if fromPatch.Suggestion.Diff == "" {
 		t.Error("expected a non-empty diff")
-	}
-}
-
-// TestPatchDedupesLikeFiles is the load-bearing test that nothing downstream
-// of the expansion can tell the two inputs apart.
-func TestPatchDedupesLikeFiles(t *testing.T) {
-	svc := newSeededService(t)
-
-	if _, err := svc.RecordSuggestion(context.Background(), SuggestInput{
-		SkillName:    "frontend-design",
-		AgentID:      "agent-1",
-		SuggestionID: "fix-description",
-		Files: []FileEdit{
-			{FilePath: "SKILL.md", Content: validSkillMD("frontend-design", "designs frontends, fixed")},
-		},
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	res, err := suggestPatch(t, svc, "agent-2", "same-fix", descriptionPatch)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !res.Deduplicated {
-		t.Fatal("expected the patch to be deduplicated onto agent-1's suggestion")
-	}
-	if res.Suggestion.AgentID != "agent-1" {
-		t.Errorf("returned suggestion belongs to %q, want agent-1", res.Suggestion.AgentID)
-	}
-	if res.Suggestion.Corroboration != 2 {
-		t.Errorf("corroboration = %d, want 2", res.Suggestion.Corroboration)
 	}
 }
 

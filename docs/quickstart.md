@@ -75,9 +75,9 @@ registry:
   enabled: true
   skillsRepo:
     url: "https://github.com/<org>/<skills-repo>.git"
-  # autoSubmitEndorsements is how many agents must independently suggest the
-  # same fix before a PR opens; omitted here, so it takes the chart's own
-  # default of 2. Set it explicitly if you want a different threshold.
+  # autoSubmitEndorsements is how many agents must stand behind one fix -
+  # its author plus the agents that read and endorsed it - before a PR
+  # opens. Set it explicitly if you want a different threshold.
   # A value of 0 means suggestions never auto-push.
   autoSubmitEndorsements: 2
   github:

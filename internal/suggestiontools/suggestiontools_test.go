@@ -178,9 +178,6 @@ func TestFullSuggestionWorkflow(t *testing.T) {
 	}
 	var recorded RecordSuggestionOutput
 	decodeStructured(t, res, &recorded)
-	if recorded.Deduplicated {
-		t.Fatal("first suggestion should not be deduplicated")
-	}
 	branch := recorded.Suggestion.Branch
 	if branch == "" {
 		t.Fatal("suggestion has no branch")
@@ -234,8 +231,8 @@ func TestFullSuggestionWorkflow(t *testing.T) {
 }
 
 // TestNoToolOpensPullRequests pins the guarantee the tool surface makes:
-// corroboration is the only thing that reaches the forge, so nothing an
-// agent can call is allowed to push a branch or open a pull request.
+// the endorsement threshold is the only thing that reaches the forge, so
+// nothing an agent can call is allowed to ask for a pull request directly.
 func TestNoToolOpensPullRequests(t *testing.T) {
 	rig := newTestRig(t, true, 0)
 	cs := connect(t, rig.deps)
@@ -246,102 +243,116 @@ func TestNoToolOpensPullRequests(t *testing.T) {
 	}
 	for _, tool := range tools.Tools {
 		switch tool.Name {
-		case "record_suggestion", "list_suggestions", "get_suggestion",
-			"list_suggestion_clusters", "get_skill_at_ref", "get_client_guide":
+		case "record_suggestion", "endorse_suggestion", "list_suggestions",
+			"get_suggestion", "list_suggestion_clusters", "get_skill_at_ref",
+			"get_client_guide":
 		default:
 			t.Errorf("unexpected tool registered: %q", tool.Name)
 		}
 	}
 }
 
-// TestRecordSuggestionDeduplicatesIdenticalContent covers the mechanism the
-// whole registry exists for: two agents independently arriving at the same
-// fix collapse into one suggestion with two corroborators, not two competing
-// pull requests.
-func TestRecordSuggestionDeduplicatesIdenticalContent(t *testing.T) {
+// record is a helper for the endorsement scenarios below: one agent's
+// suggestion of content, returning the tool's structured output.
+func record(t *testing.T, cs *mcp.ClientSession, agent, suggestionID, content string) RecordSuggestionOutput {
+	t.Helper()
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "record_suggestion",
+		Arguments: map[string]any{
+			"skill_name":    "frontend-design",
+			"agent_id":      agent,
+			"suggestion_id": suggestionID,
+			"files":         []map[string]any{{"file_path": "SKILL.md", "content": content}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out RecordSuggestionOutput
+	decodeStructured(t, res, &out)
+	return out
+}
+
+// endorse calls endorse_suggestion and returns the raw result, leaving
+// error-result assertions to the caller.
+func endorse(t *testing.T, cs *mcp.ClientSession, branch, agent, headSHA string) *mcp.CallToolResult {
+	t.Helper()
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "endorse_suggestion",
+		Arguments: map[string]any{
+			"branch":   branch,
+			"agent_id": agent,
+			"head_sha": headSHA,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return res
+}
+
+// TestEndorseSuggestionRaisesCorroboration covers the mechanism the registry
+// now runs on: a second agent that read the diff and approved it as-is
+// raises the suggestion's corroboration instead of filing a near-duplicate.
+func TestEndorseSuggestionRaisesCorroboration(t *testing.T) {
 	rig := newTestRig(t, true, 0)
 	cs := connect(t, rig.deps)
-	ctx := context.Background()
 
-	fixed := validSkillMD("frontend-design", "the corrected description")
+	first := record(t, cs, "agent-1", "fix", validSkillMD("frontend-design", "the corrected description"))
 
-	first, err := cs.CallTool(ctx, &mcp.CallToolParams{
-		Name: "record_suggestion",
-		Arguments: map[string]any{
-			"skill_name":    "frontend-design",
-			"agent_id":      "agent-1",
-			"suggestion_id": "fix",
-			"files":         []map[string]any{{"file_path": "SKILL.md", "content": fixed}},
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var firstOut RecordSuggestionOutput
-	decodeStructured(t, first, &firstOut)
+	var out EndorseSuggestionOutput
+	decodeStructured(t, endorse(t, cs, first.Suggestion.Branch, "agent-2", first.Suggestion.HeadSHA), &out)
 
-	second, err := cs.CallTool(ctx, &mcp.CallToolParams{
-		Name: "record_suggestion",
-		Arguments: map[string]any{
-			"skill_name":    "frontend-design",
-			"agent_id":      "agent-2",
-			"suggestion_id": "same-fix",
-			"files":         []map[string]any{{"file_path": "SKILL.md", "content": fixed}},
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
+	if out.Suggestion.Branch != first.Suggestion.Branch {
+		t.Errorf("endorsement landed on a different branch: %q vs %q",
+			out.Suggestion.Branch, first.Suggestion.Branch)
 	}
-	var secondOut RecordSuggestionOutput
-	decodeStructured(t, second, &secondOut)
-
-	if !secondOut.Deduplicated {
-		t.Fatal("identical content from a second agent should be deduplicated")
-	}
-	if secondOut.Suggestion.Branch != firstOut.Suggestion.Branch {
-		t.Errorf("deduplication landed on a different branch: %q vs %q",
-			secondOut.Suggestion.Branch, firstOut.Suggestion.Branch)
-	}
-	if secondOut.Suggestion.Corroboration != 2 {
-		t.Errorf("Corroboration = %d, want 2", secondOut.Suggestion.Corroboration)
+	if out.Suggestion.Corroboration != 2 {
+		t.Errorf("Corroboration = %d, want 2", out.Suggestion.Corroboration)
 	}
 }
 
-// TestRecordSuggestionAutoSubmitsAtThreshold covers the only path to a pull
-// request: enough independent corroboration opens one, with nobody asking.
+// TestEndorseSuggestionGuards pins the two refusals that keep an endorsement
+// honest: you cannot endorse your own suggestion, and you cannot endorse a
+// head you did not read.
+func TestEndorseSuggestionGuards(t *testing.T) {
+	rig := newTestRig(t, true, 0)
+	cs := connect(t, rig.deps)
+
+	first := record(t, cs, "agent-1", "fix", validSkillMD("frontend-design", "fixed"))
+
+	if res := endorse(t, cs, first.Suggestion.Branch, "agent-1", first.Suggestion.HeadSHA); !res.IsError {
+		t.Error("self-endorsement was accepted")
+	}
+
+	// The suggestion advances; the old head is no longer endorsable.
+	staleHead := first.Suggestion.HeadSHA
+	record(t, cs, "agent-1", "fix", validSkillMD("frontend-design", "revised"))
+	if res := endorse(t, cs, first.Suggestion.Branch, "agent-2", staleHead); !res.IsError {
+		t.Error("an endorsement of a superseded head was accepted")
+	}
+}
+
+// TestEndorsementAutoSubmitsAtThreshold covers the only path to a pull
+// request: enough agents standing behind one suggestion opens one, with
+// nobody asking.
 //
-// The third agent matters as much as the second. Every call that lands on
-// an already-submitted suggestion finds it at or above the threshold, so the
-// submit path is re-entered repeatedly and must return the existing pull
-// request rather than opening another.
-func TestRecordSuggestionAutoSubmitsAtThreshold(t *testing.T) {
+// The third agent matters as much as the second. Every endorsement that
+// lands on an already-submitted suggestion finds it at or above the
+// threshold, so the submit path is re-entered repeatedly and must return
+// the existing pull request rather than opening another.
+func TestEndorsementAutoSubmitsAtThreshold(t *testing.T) {
 	rig := newTestRig(t, true, 2)
 	cs := connect(t, rig.deps)
-	ctx := context.Background()
 
-	fixed := validSkillMD("frontend-design", "the corrected description")
-	for i, agent := range []string{"agent-1", "agent-2", "agent-3"} {
-		res, err := cs.CallTool(ctx, &mcp.CallToolParams{
-			Name: "record_suggestion",
-			Arguments: map[string]any{
-				"skill_name":    "frontend-design",
-				"agent_id":      agent,
-				"suggestion_id": "fix",
-				"files":         []map[string]any{{"file_path": "SKILL.md", "content": fixed}},
-			},
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		var out RecordSuggestionOutput
-		decodeStructured(t, res, &out)
+	first := record(t, cs, "agent-1", "fix", validSkillMD("frontend-design", "the corrected description"))
+	if first.AutoSubmitted != nil {
+		t.Fatal("should not auto-submit before the threshold is reached")
+	}
 
-		if i == 0 {
-			if out.AutoSubmitted != nil {
-				t.Fatal("should not auto-submit before the threshold is reached")
-			}
-			continue
-		}
+	for _, agent := range []string{"agent-2", "agent-3"} {
+		var out EndorseSuggestionOutput
+		decodeStructured(t, endorse(t, cs, first.Suggestion.Branch, agent, first.Suggestion.HeadSHA), &out)
 		if out.AutoSubmitted == nil {
 			t.Fatalf("%s: should auto-submit once corroboration reaches the threshold", agent)
 		}
@@ -356,31 +367,17 @@ func TestRecordSuggestionAutoSubmitsAtThreshold(t *testing.T) {
 
 // TestAutoSubmitWithoutCredentialsStaysLocal covers a registry that has a
 // threshold but nothing to submit with. Suggestions still commit and still
-// corroborate; they just never leave the volume.
+// gather endorsements; they just never leave the volume.
 func TestAutoSubmitWithoutCredentialsStaysLocal(t *testing.T) {
 	rig := newTestRig(t, false, 2)
 	cs := connect(t, rig.deps)
-	ctx := context.Background()
 
-	fixed := validSkillMD("frontend-design", "the corrected description")
-	for _, agent := range []string{"agent-1", "agent-2"} {
-		res, err := cs.CallTool(ctx, &mcp.CallToolParams{
-			Name: "record_suggestion",
-			Arguments: map[string]any{
-				"skill_name":    "frontend-design",
-				"agent_id":      agent,
-				"suggestion_id": "fix",
-				"files":         []map[string]any{{"file_path": "SKILL.md", "content": fixed}},
-			},
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		var out RecordSuggestionOutput
-		decodeStructured(t, res, &out)
-		if out.AutoSubmitted != nil {
-			t.Fatalf("%s: reported a pull request with no credentials configured", agent)
-		}
+	first := record(t, cs, "agent-1", "fix", validSkillMD("frontend-design", "the corrected description"))
+
+	var out EndorseSuggestionOutput
+	decodeStructured(t, endorse(t, cs, first.Suggestion.Branch, "agent-2", first.Suggestion.HeadSHA), &out)
+	if out.AutoSubmitted != nil {
+		t.Fatal("reported a pull request with no credentials configured")
 	}
 	if *rig.ghCalls != 0 {
 		t.Errorf("no pull request should have been opened; forge calls = %d", *rig.ghCalls)
@@ -508,15 +505,17 @@ func TestToolAnnotationsMatchTheirGuarantees(t *testing.T) {
 		byName[tool.Name] = tool
 	}
 
-	tool, ok := byName["record_suggestion"]
-	if !ok {
-		t.Fatal("record_suggestion not registered")
-	}
-	if tool.Annotations.ReadOnlyHint {
-		t.Error("record_suggestion writes a commit and must not be marked read-only")
-	}
-	if tool.Annotations.DestructiveHint == nil || *tool.Annotations.DestructiveHint {
-		t.Error("record_suggestion should explicitly set DestructiveHint=false (the SDK defaults it to true)")
+	for _, name := range []string{"record_suggestion", "endorse_suggestion"} {
+		tool, ok := byName[name]
+		if !ok {
+			t.Fatalf("%s not registered", name)
+		}
+		if tool.Annotations.ReadOnlyHint {
+			t.Errorf("%s writes to the repository and must not be marked read-only", name)
+		}
+		if tool.Annotations.DestructiveHint == nil || *tool.Annotations.DestructiveHint {
+			t.Errorf("%s should explicitly set DestructiveHint=false (the SDK defaults it to true)", name)
+		}
 	}
 
 	for _, name := range []string{"list_suggestions", "get_suggestion", "list_suggestion_clusters", "get_skill_at_ref"} {

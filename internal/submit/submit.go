@@ -4,9 +4,9 @@
 //
 // It sits between internal/suggestions (which owns git) and
 // internal/githubpr (which owns the forge API) because it needs both. The
-// whole sequence is driven by the registry itself, once a suggestion has
-// been corroborated by enough independent agents; nothing an agent calls
-// reaches here.
+// whole sequence is driven by the registry itself, once enough agents stand
+// behind a suggestion - its author plus its endorsers; no tool opens a pull
+// request directly.
 package submit
 
 import (
@@ -80,18 +80,18 @@ func title(sg *suggestions.Suggestion) string {
 	return fmt.Sprintf("skillsd: suggested changes to %s (%s)", sg.SkillName, sg.AgentID)
 }
 
-// body writes not just what changed, but how many independent agents
-// arrived at it and which recorded failures it claims to fix. That
-// corroboration is the reason the pull request is worth a reviewer's time,
-// and it is invisible from the diff alone.
+// body writes not just what changed, but how many agents stand behind it
+// and which recorded failures it claims to fix. That corroboration is the
+// reason the pull request is worth a reviewer's time, and it is invisible
+// from the diff alone.
 func body(sg *suggestions.Suggestion) string {
 	var b strings.Builder
 
 	fmt.Fprintf(&b, "Suggested by agent `%s` via skillsd-registry.\n\n", sg.AgentID)
 
 	if n := sg.Corroboration; n > 1 {
-		fmt.Fprintf(&b, "**Independently suggested by %d agents.** Each arrived at identical "+
-			"content without seeing the others' work:\n\n- `%s` (recorded this suggestion)\n", n, sg.AgentID)
+		fmt.Fprintf(&b, "**Backed by %d agents.** Each endorser read this exact diff and "+
+			"approved it as-is:\n\n- `%s` (recorded this suggestion)\n", n, sg.AgentID)
 		for _, e := range sg.Endorsements {
 			if !e.Stale {
 				fmt.Fprintf(&b, "- `%s`\n", e.AgentID)

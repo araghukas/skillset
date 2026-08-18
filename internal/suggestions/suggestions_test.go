@@ -303,10 +303,9 @@ func TestGetSkillAtRefResolvesBaseAndSuggestionBranch(t *testing.T) {
 // TestGetSkillAtRefNeverCarriesRegistryOnboardingFooter guards the isolation
 // the registry's onboarding footer relies on: skillparse.Load is shared
 // between internal/registry (which appends the footer before serving) and
-// this package (which reads content straight out of git for diffing and
-// dedup). If the footer ever leaked in here, every suggestion's diff would
-// show it as a spurious removal, and dedup hashing would drift from what
-// was actually suggested.
+// this package (which reads content straight out of git for diffing). If the
+// footer ever leaked in here, every suggestion's diff would show it as a
+// spurious removal.
 func TestGetSkillAtRefNeverCarriesRegistryOnboardingFooter(t *testing.T) {
 	svc, branch := newTestService(t, "frontend-design", validSkillMD("frontend-design", "original"))
 

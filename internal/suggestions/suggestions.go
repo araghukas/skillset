@@ -65,17 +65,6 @@ func New(repo *gitrepo.Repo, subPath string, maxFileBytes int) *Service {
 // this point sees one kind of request. Whole file contents are sent directly
 // only for a file that doesn't exist yet.
 //
-// Before creating a new branch, it checks whether another agent's open
-// suggestion for this skill already produces identical content. If one
-// does, no branch is created: the caller is recorded as an endorser of that
-// suggestion and it is returned with Deduplicated set. This is where N
-// agents noticing one defect collapse into a single pull request carrying N
-// signatures, instead of N pull requests saying the same thing.
-//
-// The check is skipped once the caller's own branch exists, so an agent
-// iterating on its own suggestion is never diverted onto someone else's
-// mid-flight, and skipped entirely if req.AllowDuplicate is set.
-//
 // The resulting skill is re-validated with skillparse after the commit
 // lands: if the edit breaks SKILL.md's frontmatter, RecordSuggestion
 // returns an error, but the commit itself is not rolled back - it's still
@@ -126,8 +115,7 @@ func (s *Service) RecordSuggestion(ctx context.Context, req SuggestInput) (*Sugg
 	// A patch is expanded into full file contents here, above everything that
 	// acts on a suggestion, so nothing below has to know which form the caller
 	// sent. It applies to the caller's own branch tip when they're iterating -
-	// the content their last call left - and to the base branch otherwise,
-	// which is also the tree the duplicate check reads.
+	// the content their last call left - and to the base branch otherwise.
 	if req.Patch != "" {
 		at := tip
 		if isNewBranch {
@@ -159,25 +147,6 @@ func (s *Service) RecordSuggestion(ctx context.Context, req SuggestInput) (*Sugg
 		}
 		if len(fc.Content) > s.maxFileBytes {
 			return nil, fmt.Errorf("suggestions: file %q is %d bytes, exceeding the %d byte limit", fc.FilePath, len(fc.Content), s.maxFileBytes)
-		}
-	}
-
-	if isNewBranch && !req.AllowDuplicate {
-		dup, err := s.duplicateOf(ctx, req, base)
-		if err != nil {
-			return nil, err
-		}
-		if dup != nil {
-			if err := s.Endorse(dup.Branch, req.AgentID, plumbing.NewHash(dup.HeadSHA)); err != nil {
-				return nil, fmt.Errorf("suggestions: recording endorsement: %w", err)
-			}
-			// Re-read so the returned suggestion carries the endorsement
-			// just written, and the corroboration count that follows from it.
-			refreshed, err := s.GetSuggestion(ctx, dup.Branch)
-			if err != nil {
-				return nil, err
-			}
-			return &SuggestResult{Suggestion: refreshed, Deduplicated: true}, nil
 		}
 	}
 
@@ -216,24 +185,6 @@ func (s *Service) RecordSuggestion(ctx context.Context, req SuggestInput) (*Sugg
 		return nil, err
 	}
 	return &SuggestResult{Suggestion: sg}, nil
-}
-
-// duplicateOf computes the content hash req's changes would produce and
-// returns another agent's open suggestion that already matches it, if any.
-//
-// The hash is computed from the prospective file set rather than from a
-// commit, so the common case - discovering the duplicate - costs nothing and
-// leaves no abandoned branch behind.
-func (s *Service) duplicateOf(ctx context.Context, req SuggestInput, base plumbing.Hash) (*Suggestion, error) {
-	current, err := s.skillFilesAt(ctx, req.SkillName, base)
-	if err != nil {
-		// A skill that doesn't exist at base yet can't have a duplicate
-		// suggestion to collapse into; let the commit path handle it.
-		return nil, nil
-	}
-
-	prospective := applyChanges(current, s.subPath, req.SkillName, req.Files)
-	return s.findDuplicate(ctx, req.SkillName, req.AgentID, hashFiles(prospective))
 }
 
 // ListSuggestions returns every suggestion, optionally filtered by skill
@@ -340,10 +291,6 @@ func (s *Service) getSuggestion(ctx context.Context, branch string, withDiff boo
 		})
 	}
 
-	contentHash, err := s.contentHashAt(ctx, skillName, head)
-	if err != nil {
-		return nil, fmt.Errorf("suggestions: hashing %q: %w", branch, err)
-	}
 	endorsements, corroboration, err := s.endorsementsFor(branch, head)
 	if err != nil {
 		return nil, fmt.Errorf("suggestions: reading endorsements of %q: %w", branch, err)
@@ -360,7 +307,6 @@ func (s *Service) getSuggestion(ctx context.Context, branch string, withDiff boo
 		Commits:             commits,
 		SourceThreadURI:     sourceThreadURI,
 		UpdatedAt:           updatedAt,
-		ContentHash:         contentHash,
 		Endorsements:        endorsements,
 		Corroboration:       corroboration,
 		MotivatingReportIDs: reportIDs,

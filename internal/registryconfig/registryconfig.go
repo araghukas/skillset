@@ -85,16 +85,19 @@ type Config struct {
 	// wanted - AutoSubmitEndorsements is where that choice is made.
 	SubmitConfigured bool
 
-	// AutoSubmitEndorsements is how many agents must independently arrive
-	// at identical content before a pull request is opened for it. It is
-	// the only path to a pull request: no tool lets a caller ask for one.
-	// Zero means suggestions accumulate as local branches and are never
-	// pushed anywhere.
+	// AutoSubmitEndorsements is how many agents must stand behind a
+	// suggestion's current content - its author plus the agents that read
+	// the diff and endorsed it as-is - before a pull request is opened for
+	// it. It is the only path to a pull request: no tool lets a caller ask
+	// for one directly. Zero means suggestions accumulate as local branches
+	// and are never pushed anywhere.
 	//
 	// The threshold is exactly as trustworthy as agent_id is: with
 	// self-asserted identities, one misbehaving caller can manufacture a
-	// threshold's worth of agreement by itself. Size it for callers you
-	// have authenticated.
+	// threshold's worth of agreement by itself. Endorsement makes this more
+	// load-bearing than it used to be - an endorsement is one agent's
+	// judgment, not a hash match - so size it for callers you have
+	// authenticated.
 	AutoSubmitEndorsements int
 
 	// FetchInterval is how often the base branch is re-fetched from

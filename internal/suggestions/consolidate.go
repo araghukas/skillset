@@ -2,10 +2,7 @@ package suggestions
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
-	"maps"
 	"path"
 	"sort"
 	"strings"
@@ -29,16 +26,6 @@ const (
 	// one contested passage, so the clusterer should too.
 	clusterContextLines = 3
 )
-
-// contentHashAt returns the normalized content hash of skillName's directory
-// as of commit hash.
-func (s *Service) contentHashAt(ctx context.Context, skillName string, hash plumbing.Hash) (string, error) {
-	files, err := s.skillFilesAt(ctx, skillName, hash)
-	if err != nil {
-		return "", err
-	}
-	return hashFiles(files), nil
-}
 
 // skillFilesAt reads every file in skillName's directory as of commit hash,
 // keyed by full repo-relative path.
@@ -66,65 +53,6 @@ func (s *Service) skillFilesAt(ctx context.Context, skillName string, hash plumb
 	return out, nil
 }
 
-// hashFiles digests a whole skill directory into one hex string. Paths are
-// sorted so map iteration order can't affect the result, and each file's
-// content is normalized first, so two agents that produced the same skill
-// with different trailing whitespace still land on the same hash.
-func hashFiles(files map[string][]byte) string {
-	paths := make([]string, 0, len(files))
-	for p := range files {
-		paths = append(paths, p)
-	}
-	sort.Strings(paths)
-
-	h := sha256.New()
-	for _, p := range paths {
-		fmt.Fprintf(h, "%s\x00%x\x00", p, sha256.Sum256(normalizeContent(files[p])))
-	}
-	return hex.EncodeToString(h.Sum(nil))
-}
-
-// normalizeContent canonicalizes a file for hashing: CRLF to LF, no trailing
-// whitespace on any line, no blank lines at EOF, exactly one final newline.
-// These are differences no reviewer would consider a different suggestion,
-// so letting them split a cluster would just mean more PRs saying the same
-// thing.
-func normalizeContent(b []byte) []byte {
-	text := strings.ReplaceAll(string(b), "\r\n", "\n")
-
-	lines := strings.Split(text, "\n")
-	for i, line := range lines {
-		lines[i] = strings.TrimRight(line, " \t")
-	}
-	for len(lines) > 0 && lines[len(lines)-1] == "" {
-		lines = lines[:len(lines)-1]
-	}
-	if len(lines) == 0 {
-		return nil
-	}
-	return []byte(strings.Join(lines, "\n") + "\n")
-}
-
-// applyChanges returns what files would look like with the given changes
-// applied, without writing anything. RecordSuggestion uses it to learn a
-// prospective content hash *before* committing, so a duplicate suggestion
-// can be turned into an endorsement without ever creating a branch to
-// abandon.
-func applyChanges(files map[string][]byte, subPath, skillName string, changes []FileEdit) map[string][]byte {
-	out := make(map[string][]byte, len(files))
-	maps.Copy(out, files)
-
-	for _, fc := range changes {
-		key := path.Join(subPath, skillName, fc.FilePath)
-		if fc.Deleted {
-			delete(out, key)
-			continue
-		}
-		out[key] = []byte(fc.Content)
-	}
-	return out
-}
-
 // ==========================================
 // Endorsements
 // ==========================================
@@ -141,11 +69,56 @@ func endorsementRefPrefixFor(branch string) string {
 	return endorsementRefPrefix + strings.TrimPrefix(branch, "suggestions/") + "/"
 }
 
-// Endorse records that endorserID independently produced the content already
-// on branch at head.
+// Endorse writes the endorsement ref recording endorserID's approval of the
+// content on branch at head. EndorseSuggestion is the guarded entry point;
+// this is the raw write beneath it.
 func (s *Service) Endorse(branch, endorserID string, head plumbing.Hash) error {
-	msg := fmt.Sprintf("Independently produced identical content for %s.", branch)
+	msg := fmt.Sprintf("Reviewed the suggestion on %s and endorses it as-is.", branch)
 	return s.repo.Annotate(endorsementRef(branch, endorserID), endorserID, msg, head)
+}
+
+// EndorseSuggestion records that endorserID read the suggestion on branch at
+// reviewedHead and would approve it exactly as it stands. It returns the
+// refreshed suggestion, whose Corroboration reflects the new endorsement.
+//
+// The endorsement is refused unless reviewedHead is still the branch's
+// current head: an endorsement is an agent vouching for a diff it actually
+// read, so if the suggestion advanced between the read and this call, the
+// endorser is told to re-read rather than silently endorsing content it
+// never saw. The same rule is what marks endorsements stale when a
+// suggestion advances later - see endorsementsFor.
+//
+// The suggesting agent cannot endorse its own suggestion, and a repeat
+// endorsement by the same agent overwrites its previous one rather than
+// counting twice - the ref layout allows one endorsement per agent per
+// suggestion, so the corroboration count is a count of distinct agents.
+func (s *Service) EndorseSuggestion(ctx context.Context, branch, endorserID string, reviewedHead plumbing.Hash) (*Suggestion, error) {
+	if endorserID == "" {
+		return nil, fmt.Errorf("suggestions: agent_id is required")
+	}
+	if strings.Contains(endorserID, "/") {
+		return nil, fmt.Errorf("suggestions: agent_id %q must not contain %q", endorserID, "/")
+	}
+
+	sg, err := s.getSuggestion(ctx, branch, false)
+	if err != nil {
+		return nil, err
+	}
+	if sg.AgentID == endorserID {
+		return nil, fmt.Errorf("suggestions: %q cannot endorse its own suggestion; an endorsement is another agent's approval", endorserID)
+	}
+	if sg.HeadSHA != reviewedHead.String() {
+		return nil, fmt.Errorf("suggestions: %s has advanced to %s since head %s was read; re-read it with get_suggestion and endorse the current head if it still merits it",
+			branch, sg.HeadSHA, reviewedHead)
+	}
+
+	if err := s.Endorse(branch, endorserID, reviewedHead); err != nil {
+		return nil, fmt.Errorf("suggestions: recording endorsement: %w", err)
+	}
+
+	// Re-read so the returned suggestion carries the endorsement just
+	// written, and the corroboration count that follows from it.
+	return s.GetSuggestion(ctx, branch)
 }
 
 // endorsementsFor reads a suggestion's endorsements and its corroboration
@@ -178,24 +151,6 @@ func (s *Service) endorsementsFor(branch string, head plumbing.Hash) ([]Endorsem
 		})
 	}
 	return out, corroboration, nil
-}
-
-// findDuplicate looks for an open suggestion for skillName, by an agent
-// other than agentID, whose content hash already equals hash.
-func (s *Service) findDuplicate(ctx context.Context, skillName, agentID, hash string) (*Suggestion, error) {
-	existing, err := s.ListSuggestions(ctx, skillName, "")
-	if err != nil {
-		return nil, err
-	}
-	for _, sg := range existing {
-		if sg.AgentID == agentID {
-			continue
-		}
-		if sg.ContentHash == hash {
-			return sg, nil
-		}
-	}
-	return nil, nil
 }
 
 // ==========================================

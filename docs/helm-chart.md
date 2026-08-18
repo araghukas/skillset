@@ -165,7 +165,7 @@ For local dev, the Tiltfile creates them for you from gitignored files; see
 | `registry.skillsRepo.url` | `""` | `SKILLS_REPO_URL` | Clone URL — usually the same repo as `skillsRepo.url`, configured with its own credential |
 | `registry.skillsRepo.baseBranch` | `main` | `SKILLS_REPO_BASE_BRANCH` | Branch suggestions fork from / PRs target |
 | `registry.skillsRepo.subPath` | `skills` | `SKILLS_SUBPATH` | Subdirectory holding skill directories |
-| `registry.autoSubmitEndorsements` | `2` | `AUTO_SUBMIT_ENDORSEMENTS` | Corroboration count that opens a PR — the only path to one; `0` keeps suggestions local, see [skillsd-registry.md](skillsd-registry.md#consolidation-how-n-agents-produce-one-pull-request). `2` is this chart's default, set explicitly in `values.yaml` — the binary's own fallback when the env var is absent entirely (e.g. run outside the chart) is `0` |
+| `registry.autoSubmitEndorsements` | `2` | `AUTO_SUBMIT_ENDORSEMENTS` | How many agents must stand behind a suggestion (author + endorsers) before a PR opens — the only path to one; `0` keeps suggestions local, see [skillsd-registry.md](skillsd-registry.md#consolidation-how-n-agents-produce-one-pull-request). `2` is this chart's default, set explicitly in `values.yaml` — the binary's own fallback when the env var is absent entirely (e.g. run outside the chart) is `0` |
 | `registry.github.owner` / `.repo` | `""` / `""` | `GITHUB_OWNER` / `GITHUB_REPO` | Target repo for pull requests |
 | `registry.github.githubApp.appId` | `""` | `GITHUB_APP_ID` | App client ID or numeric app ID |
 | `registry.github.githubApp.installationId` | `""` | `GITHUB_APP_INSTALLATION_ID` | Installation to act as |

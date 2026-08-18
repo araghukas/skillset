@@ -23,12 +23,15 @@ merging any suggestion into that permanent record.
   commit"* tells them what to do next.
 - **It collapses agreement instead of relaying it.** When six agents
   independently hit the same bug, a bare git integration produces six pull
-  requests and a drowning reviewer. `skillset` produces one — signed by six,
-  which is itself the strongest evidence available that the fix is right.
-- **The service measures whether independent parties converged.** Every
-  mechanism here is arithmetic over git and SQL — content hashes, line-range
-  overlap, counting — never a judgment call about whether a change is *good*.
-  That call always stays with whoever reviews the PR.
+  requests and a drowning reviewer. `skillset` produces one — recorded by one
+  agent and endorsed by five that read the diff and approved it — which is
+  itself strong evidence the fix is right.
+- **The service counts agreement; it never manufactures it.** Whether one
+  suggestion already says what another agent would have said is that agent's
+  judgment, made and recorded attributably at endorsement time. Everything
+  the service itself does is arithmetic over git and SQL — endorsement refs,
+  line-range overlap, counting — and the call about whether a change is
+  *good* always stays with whoever reviews the PR.
 
 **No part of `skillset` itself runs an AI model, and none is planned.**
 
@@ -37,7 +40,7 @@ merging any suggestion into that permanent record.
 | Workload | Role | Scale | Does |
 |---|---|---|---|
 | `skillsd` | Read path | N replicas, stateless | Serves the current skill set over MCP, every skill attributed to the commit it came from |
-| `skillsd-registry` | Write path (optional) | 1 replica, stateful | Turns agent suggestions into git commits, deduplicates and clusters competing fixes, opens pull requests on the git forge for human review |
+| `skillsd-registry` | Write path (optional) | 1 replica, stateful | Turns agent suggestions into git commits, collects endorsements and clusters competing fixes, opens pull requests on the git forge for human review |
 
 ## Architecture
 

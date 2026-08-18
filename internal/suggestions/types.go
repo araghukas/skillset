@@ -6,7 +6,7 @@ import "time"
 //
 // Complete file contents are the form a suggestion is recorded in: a patch
 // supplied instead is expanded into these before anything else runs, so
-// deduplication, the commit, and clustering all see one kind of request. It
+// the commit and clustering both see one kind of request. It
 // converts to a gitrepo.FileChange on the way to a commit; the two are
 // deliberately separate types because this one is agent-supplied and relative
 // to the skill directory, while gitrepo's is repo-relative.
@@ -29,13 +29,13 @@ type Commit struct {
 	AuthoredAt time.Time `json:"authored_at,omitzero"`
 }
 
-// Endorsement records that an agent independently arrived at exactly the
-// content a suggestion already contains.
+// Endorsement records that an agent read a suggestion's diff and would
+// approve it exactly as it stands.
 //
-// There is deliberately no way to endorse a suggestion you have merely read
-// and agreed with: an endorsement is only meaningful as evidence if it was
-// produced without knowledge of the suggestion it lands on, so the only way
-// to create one is for record_suggestion to find your content already there.
+// An endorsement is a judgment, not a computation: the endorsing agent
+// decided the suggestion already says what it would have said. What stays
+// mechanical is the counting - one endorsement per agent per suggestion,
+// pinned to the commit the agent actually reviewed.
 //
 // Endorsements live in git as refs under refs/endorsements/, not in a
 // database, so they survive exactly as long as the repository does.
@@ -86,18 +86,12 @@ type Suggestion struct {
 
 	UpdatedAt time.Time `json:"updated_at,omitzero"`
 
-	// ContentHash is a normalized digest of every file in the skill's
-	// directory at HeadSHA. Two suggestions with the same ContentHash produce
-	// the same skill, whatever route they took to get there; it is the key
-	// record_suggestion deduplicates on.
-	ContentHash string `json:"content_hash"`
-
-	// Endorsements are other agents that independently produced this exact
-	// content. The suggesting agent is not counted among them.
+	// Endorsements are other agents that reviewed this suggestion and
+	// approved it as-is. The suggesting agent is not counted among them.
 	Endorsements []Endorsement `json:"endorsements,omitempty"`
 
 	// Corroboration is 1 (the suggesting agent) plus the number of non-stale
-	// endorsements: how many agents independently arrived at this content.
+	// endorsements: how many agents stand behind this exact content.
 	Corroboration int `json:"corroboration"`
 
 	// MotivatingReportIDs are outcome report IDs the suggesting agent cited
@@ -109,9 +103,9 @@ type Suggestion struct {
 // overlapping line ranges of the same files.
 //
 // Overlap is the signal: two agents rewriting the same passage are almost
-// certainly responding to the same defect, even when their fixes differ and
-// their content hashes don't match. Non-overlapping suggestions are left
-// alone - they're orthogonal edits that happen to share a skill.
+// certainly responding to the same defect, even when their wording differs.
+// Non-overlapping suggestions are left alone - they're orthogonal edits
+// that happen to share a skill.
 //
 // Clusters are recomputed from branch state on every call. Nothing about
 // them is stored, and no judgment is applied: the server measures whether
@@ -162,18 +156,9 @@ type SuggestInput struct {
 	// than taking the change on faith. Not validated against the evidence
 	// store - the registry runs fine with evidence collection disabled.
 	MotivatingReportIDs []string
-
-	// AllowDuplicate skips the content-hash dedup check and forces a branch
-	// of the caller's own even if an identical suggestion already exists.
-	// Rarely wanted; endorsing the existing suggestion is almost always
-	// better.
-	AllowDuplicate bool
 }
 
-// SuggestResult is the outcome of a RecordSuggestion call: either the
-// caller's own suggestion, or - when their content already existed - the
-// suggestion they were recorded as endorsing instead.
+// SuggestResult is the outcome of a RecordSuggestion call.
 type SuggestResult struct {
-	Suggestion   *Suggestion
-	Deduplicated bool
+	Suggestion *Suggestion
 }
