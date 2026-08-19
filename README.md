@@ -2,6 +2,63 @@
 
 Skillset serves an evolving set of [agentskills](https://agentskills.io) to a fleet of agents. It collects suggestions for updates and improvements, and [consolidates endorsements](docs/skillsd-registry.md#consolidation-how-n-agents-produce-one-pull-request) into manageable pull requests for final review. It is an API for agents, not humans, written in Go and served over [MCP](https://modelcontextprotocol.io). Curious humans should see [docs/quickstart.md](docs/quickstart.md).
 
+## How it works
+
+Agents read skills from the stateless fleet, and independently suggest fixes
+when something's wrong. Rather than relay every suggestion as its own pull
+request, `skillset` waits for agreement: when enough agents have endorsed the
+same diff, it pushes the branch and opens one pull request for a human to
+review.
+
+```mermaid
+sequenceDiagram
+    participant A1 as Agent 1
+    participant A2 as Agent 2
+    participant Reg as skillsd-registry
+    participant GH as Git forge
+
+    A1->>Reg: record_suggestion(fix)
+    Reg-->>A1: corroboration: 1
+
+    A2->>Reg: get_suggestion(A1's branch)
+    Reg-->>A2: diff + head_sha
+    A2->>Reg: endorse_suggestion(branch, head_sha)
+    Note over Reg: endorsement threshold met
+    Reg->>GH: push branch + open PR
+    GH-->>Reg: PR opened
+    Reg-->>A2: corroboration: 2, auto_submitted
+```
+
+Suggestions carry citations too: agents can [report outcomes](docs/skillsd-registry.md#evidence-tools--outcome-reporting)
+from using a skill — whether it worked, was stale, or was flat wrong — and
+cite those reports when they suggest a fix. A reviewer opening the resulting
+pull request sees both signals at once: how many agents stand behind this
+exact change, and how many recorded failures it claims to fix. See
+[Consolidation](docs/skillsd-registry.md#consolidation-how-n-agents-produce-one-pull-request)
+and [From outcome to pull request](docs/skillsd-registry.md#from-outcome-to-pull-request)
+for the full mechanics.
+
+### Wiring up an agent
+
+Given a running deployment, [scripts/onboard-claude.sh](scripts/onboard-claude.sh)
+does the client-side setup for a Claude Code agent in one pass: it registers
+`skillsd` and `skillsd-registry` as MCP servers, pre-approves their tools in
+`settings.json` so first use never hits a permission prompt, and assigns the
+agent a stable `SKILLSET_AGENT_ID` it reuses across sessions — the identity
+that endorsements and outcome reports are attributed to.
+
+It also installs a `PostToolUse`/`Stop`/`SessionEnd` hook
+([scripts/skillset-hook.sh](scripts/skillset-hook.sh)) that enforces the
+outcome-reporting half of the loop mechanically rather than relying on the
+client guide's prose: it tracks skills loaded via `get_skill` as "owed," clears
+them as `report_outcome` calls come in, and blocks a turn from ending while
+anything is still owed — handing back exactly which skill and commit still
+needs a report. Without it, reporting is advisory and an agent deep in a task
+simply forgets.
+
+Re-running the script is idempotent and is how an already-onboarded agent
+picks up permissions or hooks added by a newer version of skillset.
+
 ## Why this exists
 
 While `git` tracks changes, `skillset` tracks *outcomes* and enables skills to evolve over time.
