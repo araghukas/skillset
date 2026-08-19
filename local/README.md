@@ -71,9 +71,17 @@ port-forwards it. So `make dev-down` leaves Gitea and its tokens up for the
 next `make dev`, while `make gitea-down` / `make cluster-down` destroy the pod
 and wipe the now-unusable token files with it.
 
-Gitea is reachable at `localhost:3000` once Tilt has forwarded it (`admin`
-user `skillset-admin`; its password is known only to the `gitea-up` run that
-created it — reset rather than try to recover it).
+### Signing in
+
+Gitea is reachable at `localhost:3000` once Tilt has forwarded it. `gitea-up`
+creates a single admin user with fixed, hard-coded credentials:
+
+| Field | Value |
+| --- | --- |
+| Username | `skillset-admin` |
+| Password | `skillset-admin-password` |
+
+These are deliberately predictable for testing purposes.
 
 ## 2. Real repo with token auth
 
