@@ -156,17 +156,16 @@ registry:
     # directories actually live. Leave empty if skills sit at the repo root.
     subPath: skills
 
-  # autoSubmitEndorsements is how many agents must independently arrive at
-  # byte-identical content before a pull request is opened for it. When a
-  # second agent suggests content that already exists, it doesn't get its own
-  # branch: it's recorded as an endorsement of the first, and this counts
-  # those endorsements.
+  # autoSubmitEndorsements is how many agents must stand behind a suggestion's
+  # current content - its author plus the agents that read its diff and
+  # endorsed it as-is via endorse_suggestion - before a pull request is opened
+  # for it.
   #
   # This is the only path to a pull request. No MCP tool lets an agent ask
-  # for one, so a suggestion reaches a human reviewer by corroboration or not
-  # at all. Set to 0 and suggestions accumulate as branches in repoData below,
-  # never pushed anywhere - a reasonable choice only if you intend to collect
-  # suggestions and act on them by hand.
+  # for one directly, so a suggestion reaches a human reviewer by gathering
+  # endorsements or not at all. Set to 0 and suggestions accumulate as
+  # branches in repoData below, never pushed anywhere - a reasonable choice
+  # only if you intend to collect suggestions and act on them by hand.
   #
   # The threshold is exactly as trustworthy as agent_id is: with
   # self-asserted identities, a single misconfigured caller can manufacture a

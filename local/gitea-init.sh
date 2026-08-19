@@ -18,6 +18,7 @@ set -euo pipefail
 KIND_CONTEXT="kind-skillsd"
 NAMESPACE="default"
 ADMIN_USER="skillset-admin"
+ADMIN_PASS="skillset-admin-password"
 REPO_NAME="skills"
 UPSTREAM_URL="${GITEA_SEED_URL:-https://github.com/anthropics/skills.git}"
 UPSTREAM_REF="${GITEA_SEED_REF:-main}"
@@ -68,9 +69,6 @@ if [[ -f "$WRITE_TOKEN_FILE" ]]; then
   echo "gitea-init: $WRITE_TOKEN_FILE doesn't authenticate against this Gitea instance (stale or from a different remote) - discarding it and rebootstrapping." >&2
   rm -f "$WRITE_TOKEN_FILE" "$READ_TOKEN_FILE"
 fi
-
-# Create an admin user
-ADMIN_PASS="$(openssl rand -hex 16)"
 
 echo "gitea-init: creating admin user"
 # kubectl exec lands as root in this image (unlike the container's own

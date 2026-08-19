@@ -57,11 +57,11 @@ func run() error {
 	svc := suggestions.New(repo, cfg.SkillsSubPath, cfg.MaxFileContentBytes)
 	gh := githubpr.New(cfg.GitHubAPIBaseURL, cfg.GitHubOwner, cfg.GitHubRepo, cfg.GitHubAuth)
 
-	// Corroboration is the only thing that opens a pull request, so both the
-	// threshold and the credential have to be in place for a suggestion to
-	// ever leave this pod. Each missing half is worth saying out loud at
-	// startup: the alternative is suggestions silently accumulating on a
-	// volume nobody is watching.
+	// The endorsement threshold is the only thing that opens a pull request,
+	// so both the threshold and the credential have to be in place for a
+	// suggestion to ever leave this pod. Each missing half is worth saying
+	// out loud at startup: the alternative is suggestions silently
+	// accumulating on a volume nobody is watching.
 	switch {
 	case cfg.AutoSubmitEndorsements <= 0:
 		slog.Warn("auto-submission is off: suggestions will accumulate as local branches and are never pushed",
@@ -70,7 +70,7 @@ func run() error {
 		slog.Warn("auto-submission is configured but no pull request can be opened: GitHub credential, owner, or repo is missing",
 			"threshold", cfg.AutoSubmitEndorsements)
 	default:
-		slog.Info("auto-submission is enabled: suggestions corroborated by enough agents open pull requests",
+		slog.Info("auto-submission is enabled: suggestions endorsed by enough agents open pull requests",
 			"threshold", cfg.AutoSubmitEndorsements)
 	}
 

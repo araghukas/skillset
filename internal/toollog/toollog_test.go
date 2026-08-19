@@ -36,9 +36,21 @@ func call(t *testing.T, name string, args, structuredOut string, handlerErr erro
 func TestMiddleware_RecordSuggestionFields(t *testing.T) {
 	out := call(t, "record_suggestion",
 		`{"skill_name":"deploy-helm","agent_id":"agent-1","commit_message":"fix stale flag"}`,
-		`{"deduplicated":false}`, nil)
+		`{}`, nil)
 
-	for _, want := range []string{`tool=record_suggestion`, `skill=deploy-helm`, `commit_message="fix stale flag"`, `deduplicated=false`} {
+	for _, want := range []string{`tool=record_suggestion`, `skill=deploy-helm`, `commit_message="fix stale flag"`, `auto_submitted=false`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("log line missing %q; got %q", want, out)
+		}
+	}
+}
+
+func TestMiddleware_EndorseSuggestionFields(t *testing.T) {
+	out := call(t, "endorse_suggestion",
+		`{"branch":"suggestions/agent-1/deploy-helm/fix","agent_id":"agent-2"}`,
+		`{"auto_submitted":{"pull_request_url":"https://example.com/pr/7"}}`, nil)
+
+	for _, want := range []string{`tool=endorse_suggestion`, `branch=suggestions/agent-1/deploy-helm/fix`, `agent=agent-2`, `auto_submitted=true`} {
 		if !strings.Contains(out, want) {
 			t.Errorf("log line missing %q; got %q", want, out)
 		}

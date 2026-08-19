@@ -71,9 +71,17 @@ port-forwards it. So `make dev-down` leaves Gitea and its tokens up for the
 next `make dev`, while `make gitea-down` / `make cluster-down` destroy the pod
 and wipe the now-unusable token files with it.
 
-Gitea is reachable at `localhost:3000` once Tilt has forwarded it (`admin`
-user `skillset-admin`; its password is known only to the `gitea-up` run that
-created it — reset rather than try to recover it).
+### Signing in
+
+Gitea is reachable at `localhost:3000` once Tilt has forwarded it. `gitea-up`
+creates a single admin user with fixed, hard-coded credentials:
+
+| Field | Value |
+| --- | --- |
+| Username | `skillset-admin` |
+| Password | `skillset-admin-password` |
+
+These are deliberately predictable for testing purposes.
 
 ## 2. Real repo with token auth
 
@@ -239,7 +247,7 @@ carries the change, which the error points out. Use `files` with whole file
 contents only for a file that doesn't exist yet.
 
 Every other tool follows the same `tools/call` shape with its own
-`name`/`arguments` — `get_suggestion`, `list_suggestions`,
+`name`/`arguments` — `endorse_suggestion`, `get_suggestion`, `list_suggestions`,
 `list_suggestion_clusters`, and (if evidence collection is enabled)
 `report_outcome`, `list_outcome_reports`, `list_skill_signals`. Call
 `get_client_guide` on either server for the full workflow each tool expects —
@@ -270,7 +278,7 @@ against outside `make dev` / a real cluster.
 |---|---|
 | `health_test.go` | `/healthz` on both servers, `initialize`'s `instructions`, `tools/list` naming the expected tools |
 | `skills_test.go` | `list_skills`, `get_skill` (found + not-found), `get_client_guide` |
-| `suggestions_test.go` | `record_suggestion` → `get_suggestion` → `get_skill_at_ref` → `list_suggestions` → `list_suggestion_clusters`, plus driving enough corroborating agents to make the registry open a pull request |
+| `suggestions_test.go` | `record_suggestion` → `get_suggestion` → `get_skill_at_ref` → `list_suggestions` → `list_suggestion_clusters`, plus driving enough endorsing agents through `endorse_suggestion` to make the registry open a pull request |
 | `evidence_test.go` | `report_outcome` (including idempotent replay), `list_outcome_reports`, `list_skill_signals` |
 
 Each file is independently runnable (`go test -tags e2e -run TestGetSkill

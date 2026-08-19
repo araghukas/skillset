@@ -3,8 +3,8 @@
 `skillsd-registry` is an optional, single-replica component that gives agents a
 write path onto skills — recording suggested changes and reporting how a
 skill actually performed — without ever handing them raw git or forge
-credentials. It turns the suggestions that enough agents independently agree
-on into pull requests; agents themselves never get to open one. It owns a
+credentials. It turns the suggestions that enough agents stand behind into
+pull requests; agents themselves never get to open one. It owns a
 real git working copy and (optionally) a SQLite database, both on their own
 persistent volumes.
 
@@ -25,17 +25,19 @@ the citation chain in [From outcome to pull request](#from-outcome-to-pull-reque
 
 | Tool | Purpose |
 |---|---|
-| `record_suggestion` | Commits an agent's changes to a skill's suggestion branch — creates it if this is the first call, appends if the agent is iterating. Changes arrive as a unified `patch`, or as full file content for a new file. Deduplicates against existing suggestions (below). Takes `motivating_report_ids`, the evidence this change claims to fix. |
+| `record_suggestion` | Commits an agent's changes to a skill's suggestion branch — creates it if this is the first call, appends if the agent is iterating. Changes arrive as a unified `patch`, or as full file content for a new file. Takes `motivating_report_ids`, the evidence this change claims to fix. |
+| `endorse_suggestion` | Records that the caller read another agent's suggestion and would approve its diff exactly as-is. Endorsements are what carry a suggestion to the auto-submit threshold (below). |
 | `list_suggestions` | Lists suggestions, filterable by skill and/or agent. |
 | `list_suggestion_clusters` | Groups a skill's open suggestions into clusters of competing answers to the same defect, most-contested first. |
-| `get_suggestion` | Fetches one suggestion by branch name: its diff against base, commit history, and endorsements. |
+| `get_suggestion` | Fetches one suggestion by branch name: its diff against base, commit history, and endorsements. Reading the diff here is the precondition for endorsing it. |
 | `get_skill_at_ref` | Fetches a skill's metadata as of an arbitrary ref — a branch or a commit SHA, including the one a past outcome report names. |
 
-**No tool opens a pull request.** Every tool here reads or commits; pushing a
-branch and opening a PR is a decision the registry makes on its own, when a
-suggestion reaches the corroboration threshold described below. An agent's
-influence ends at the quality of the suggestion it commits, which is what
-keeps a single caller from putting anything in front of a human reviewer.
+**No tool opens a pull request directly.** Every tool here reads, commits, or
+endorses; pushing a branch and opening a PR is a decision the registry makes
+on its own, when a suggestion reaches the endorsement threshold described
+below. A single caller can record and it can endorse, but it cannot ask for a
+pull request — only enough distinct agents standing behind one suggestion
+puts anything in front of a human reviewer.
 
 Suggestions are internal bookkeeping inside the registry's own git working
 copy, not a git presence an agent has any stake in: branches are namespaced
@@ -70,78 +72,78 @@ use token auth.
 
 The problem shows up the moment more than a handful of agents run at once: they
 hit the same defect independently, and — left alone — a reviewer gets N pull
-requests describing one bug. Three deterministic mechanisms fix this, all of
-them arithmetic; no model is involved.
+requests describing one bug. Consolidation splits into two cleanly separated
+halves: **judgment**, made by the agents themselves, and **counting**, which
+stays deterministic arithmetic over git refs on the registry's side.
 
-**Content-hash deduplication.** Before creating a branch, `record_suggestion`
-hashes the caller's *prospective* file set and compares it against every
-open suggestion for that skill (files normalized first — CRLF, trailing
-whitespace, blank lines at EOF — so cosmetic differences don't split a
-cluster). On a match, no branch is created: the caller is recorded as an
-**endorsement** on the existing suggestion instead.
+**Endorsement instead of duplication.** An agent about to suggest a fix first
+checks whether an open suggestion already makes it (`list_suggestion_clusters`
+to find suggestions touching the same region, `get_suggestion` to read the
+actual diff). If it would approve an existing diff *exactly as-is*, it calls
+`endorse_suggestion` instead of recording a near-duplicate; if it would change
+anything at all, it records its own suggestion and the two streams compete.
+Whether two fixes are equivalent is the endorsing agent's judgment.
 
 ```mermaid
 flowchart TD
-  In(["record_suggestion(agent, skill,\nsuggestion_id, patch or files)"]) --> Form{"patch?"}
-  Form -- yes --> Expand["Expand against the agent's\nbranch tip, or base HEAD"]
-  Form -- "no (new file)" --> Start
-  Expand --> Start
+  Found["Agent has a fix in mind"] --> Check["list_suggestion_clusters +\nget_suggestion: does an open\nsuggestion already make it?"]
+  Check -- "yes, and I'd approve\nthe diff as-is" --> Endorse["endorse_suggestion\n(branch, head_sha read)"]
+  Check -- "no, or I'd change\nsomething" --> Record["record_suggestion\n(own stream)"]
 
-  Start["Full file content"] --> OwnBranch{"Agent's own\nbranch exists?"}
+  Endorse --> Guard{"head still current?\nnot own suggestion?"}
+  Guard -- no --> Refused["Refused - re-read,\nor record own stream"]
+  Guard -- yes --> Count["corroboration += 1\n(one ref per agent)"]
 
-  OwnBranch -- yes --> Commit["Commit onto that branch\n(iteration, never diverted)"]
-  OwnBranch -- no --> AllowDup{"allow_duplicate\nset?"}
+  Record --> Validate{"skillparse\nvalidates result"}
+  Validate -- fails --> Invalid["Error - commit stands,\nfix with a follow-up call"]
+  Validate -- ok --> One["corroboration: 1"]
 
-  AllowDup -- yes --> Commit
-  AllowDup -- no --> Hash["Hash the prospective\nfile set (normalized)"]
-
-  Hash --> Match{"Matches another agent's\nopen suggestion?"}
-
-  Match -- no --> Commit
-  Match -- yes --> Endorse["Record caller as endorser\n(no branch created)"]
-
-  Commit --> Validate{"skillparse\nvalidates result"}
-  Validate -- fails --> Invalid["Error — commit stands,\nfix with a follow-up call"]
-  Validate -- ok --> OwnResult(["deduplicated: false"])
-
-  Endorse --> DupResult(["deduplicated: true\ncorroboration += 1"])
-
-  OwnResult --> AutoCheck{"corroboration ≥\nautoSubmitEndorsements?"}
-  DupResult --> AutoCheck
+  Count --> AutoCheck{"corroboration ≥\nautoSubmitEndorsements?"}
+  One --> AutoCheck
   AutoCheck -- "yes, threshold > 0" --> AutoPR["Push branch + open PR"]
   AutoCheck -- no --> Done(["Return to caller"])
   AutoPR --> Done
 ```
 
-There's deliberately **no tool to endorse a suggestion you've merely read and
-agreed with** — an endorsement is only meaningful as evidence if it was produced
-without knowledge of the suggestion it lands on. Endorsements are git refs
+An endorsement is pinned to the exact commit the endorser read: the call
+carries the `head_sha` from the `get_suggestion` response, and is refused if
+the suggestion has advanced since — no agent ever vouches for a diff it
+hasn't seen. The same rule runs forward in time: endorsements are git refs
 (`refs/endorsements/<agent>/<skill>/<id>/<endorser>`), pushed alongside the
-branch on submission; when a suggestion advances, earlier endorsements are kept
-but marked `stale` and stop counting.
+branch on submission, and when a suggestion advances, earlier endorsements
+are kept but marked `stale` and stop counting. One ref per agent per
+suggestion means endorsing twice counts once, and an agent cannot endorse its
+own suggestion.
 
-**Clustering by contested region.** Suggestions that aren't identical may
-still be competing answers to one defect. `list_suggestion_clusters` diffs
-each suggestion against its fork point, extracts the base-side line ranges
-touched, and unions suggestions whose ranges overlap within a diff-context
-window — a stand-in for three-way conflict detection that arguably improves
-on it, since edits that would merge cleanly can still be rival answers.
-Clusters are computed per call, never stored.
+**Clustering by contested region.** Suggestions that compete may still be
+rival answers to one defect. `list_suggestion_clusters` diffs each suggestion
+against its fork point, extracts the base-side line ranges touched, and
+unions suggestions whose ranges overlap within a diff-context window — a
+stand-in for three-way conflict detection that arguably improves on it, since
+edits that would merge cleanly can still be rival answers. Clusters are
+computed per call, never stored. With endorsement handling agreement at
+submission time, a cluster of suggestions whose authors did *not* endorse
+each other is a real signal: genuine disagreement about the same passage,
+worth a human's attention.
 
 **Auto-submission at a threshold.** `autoSubmitEndorsements` is how many
-independent agents must reach identical content before a PR opens. It's the
-only path to a pull request — set it to `0` and suggestions accumulate as
-branches on the registry's volume, never pushed anywhere. This chart defaults
-it to `2`, set explicitly in `values.yaml`; the binary's own fallback when the
-env var is unset entirely (running outside the chart) is `0`.
+agents must stand behind a suggestion's current content — its author plus its
+non-stale endorsers — before a PR opens. It's the only path to a pull request
+— set it to `0` and suggestions accumulate as branches on the registry's
+volume, never pushed anywhere. This chart defaults it to `2`, set explicitly
+in `values.yaml`; the binary's own fallback when the env var is unset entirely
+(running outside the chart) is `0`.
 
 The threshold is exactly as trustworthy as `agent_id` is. **Authenticate
 callers**; with self-asserted identity, one misconfigured caller can manufacture
-a threshold's worth of agreement by itself. Size the threshold for the callers
-you actually trust, and read it as "how many independent agents must agree
-before a human is asked to look", not as a security boundary on its own.
+a threshold's worth of agreement by itself. An endorsement is one agent's
+judgment, not a hash match, so a caller can also be *persuaded* into one —
+prompt-injected skill content included — which makes this more load-bearing
+than a purely mechanical check. Size the threshold for the callers you
+actually trust, and read it as "how many agents must stand behind this before
+a human is asked to look", not as a security boundary on its own.
 
-Three agents independently hitting the same defect, `autoSubmitEndorsements: 2`:
+Three agents hitting the same defect, `autoSubmitEndorsements: 2`:
 
 ```mermaid
 sequenceDiagram
@@ -152,21 +154,23 @@ sequenceDiagram
     participant GH as Git forge
 
     A1->>Reg: record_suggestion(fix X)
-    Reg-->>A1: deduplicated: false, corroboration: 1
+    Reg-->>A1: corroboration: 1
 
-    A2->>Reg: record_suggestion(fix X, same content)
-    Reg->>Reg: record endorsement (agent-2)
-    Reg-->>A2: deduplicated: true, corroboration: 2
-
-    A3->>Reg: record_suggestion(fix X, same content)
+    A2->>Reg: get_suggestion(A1's branch)
+    Reg-->>A2: diff + head_sha
+    A2->>Reg: endorse_suggestion(branch, head_sha)
     Note over Reg: threshold (2) now met
-    Reg->>Reg: record endorsement (agent-3)
     Reg->>GH: push branch + endorsement refs
-    Reg->>GH: open PR (3 agents, endorsers named)
+    Reg->>GH: open PR (2 agents, endorser named)
     GH-->>Reg: PR #42
-    Reg-->>A3: deduplicated: true, corroboration: 3, auto_submitted: PR #42
+    Reg-->>A2: corroboration: 2, auto_submitted: PR #42
 
-    Note over GH: one pull request, signed by three agents,<br/>reviewed once by a human
+    A3->>Reg: get_suggestion(A1's branch)
+    Reg-->>A3: diff + head_sha
+    A3->>Reg: endorse_suggestion(branch, head_sha)
+    Reg-->>A3: corroboration: 3, auto_submitted: PR #42 (existing)
+
+    Note over GH: one pull request, backed by three agents,<br/>reviewed once by a human
 ```
 
 ## Evidence tools — outcome reporting
@@ -247,13 +251,12 @@ table, so it survives everything downstream:
 4. When the suggestion is auto-submitted, they're rendered into the PR body —
    "Motivated by N recorded outcome report(s)" — next to the endorsing agents.
 
-So a reviewer sees both kinds of independent corroboration at once: how many
-agents converged on this content, and how many recorded failures it claims to
-fix.
+So a reviewer sees both kinds of corroboration at once: how many agents stand
+behind this exact content, and how many recorded failures it claims to fix.
 
 **What is deliberately not connected.** No defect rate opens a pull request.
-A skill can fail in every report filed and nothing happens until agents
-converge on identical content — corroboration is the only trigger, and evidence
+A skill can fail in every report filed and nothing happens until enough agents
+stand behind one fix — the endorsement count is the only trigger, and evidence
 only argues for the fix a human eventually reads. Citation is advisory, not
 enforced: `record_suggestion` accepts an empty `motivating_report_ids`, and
 with `registry.evidence.enabled` false the evidence tools are absent while the
@@ -269,9 +272,10 @@ and [the client guide](skillsd.md#the-client-guide-get_client_guide-and-connect-
 Both consolidation and evidence rest on `agent_id`, which is currently
 **self-asserted**. Corroboration counts and defect rates are only as trustworthy
 as the callers are — fine for a trusted fleet, not for an open one. Since
-corroboration is what opens pull requests, authenticate callers before pointing
-this at a repo whose reviewers will trust what arrives, or treating signals as
-authoritative.
+endorsements are what open pull requests, and an endorsement is an agent's
+judgment rather than a mechanical hash match, authenticate callers before
+pointing this at a repo whose reviewers will trust what arrives, or treating
+signals as authoritative.
 
 ## Configuration
 

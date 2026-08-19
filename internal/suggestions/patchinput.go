@@ -19,8 +19,8 @@ import (
 const onboardingMarker = "## Improving this skill"
 
 // expandPatch turns a unified diff into the same full-content file set the
-// files input carries, so everything downstream - deduplication, the commit,
-// clustering - sees one kind of request.
+// files input carries, so everything downstream - the commit, clustering -
+// sees one kind of request.
 //
 // at is the commit the patch applies to: the caller's own suggestion branch
 // when they are iterating on one, the base branch otherwise. onOwnBranch says

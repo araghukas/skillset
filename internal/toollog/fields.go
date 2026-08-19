@@ -63,10 +63,23 @@ var extractors = map[string]toolFields{
 			return []any{"skill", in.SkillName, "agent", in.AgentID, "commit_message", in.CommitMessage}
 		}),
 		response: unmarshalFields(func(out struct {
-			Deduplicated  bool `json:"deduplicated"`
-			AutoSubmitted any  `json:"auto_submitted"`
+			AutoSubmitted any `json:"auto_submitted"`
 		}) []any {
-			return []any{"deduplicated", out.Deduplicated, "auto_submitted", out.AutoSubmitted != nil}
+			return []any{"auto_submitted", out.AutoSubmitted != nil}
+		}),
+	},
+
+	"endorse_suggestion": {
+		request: unmarshalFields(func(in struct {
+			Branch  string `json:"branch"`
+			AgentID string `json:"agent_id"`
+		}) []any {
+			return []any{"branch", in.Branch, "agent", in.AgentID}
+		}),
+		response: unmarshalFields(func(out struct {
+			AutoSubmitted any `json:"auto_submitted"`
+		}) []any {
+			return []any{"auto_submitted", out.AutoSubmitted != nil}
 		}),
 	},
 

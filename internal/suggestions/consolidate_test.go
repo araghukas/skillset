@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/go-git/go-git/v5/plumbing"
 )
 
 // suggest is a terse helper for the many-agents scenarios below.
@@ -24,113 +26,107 @@ func suggest(t *testing.T, svc *Service, agent, suggestionID, content string) *S
 	return res
 }
 
-func TestIdenticalSuggestionsCollapseIntoOneWithEndorsements(t *testing.T) {
-	svc, _ := newTestService(t, "frontend-design", validSkillMD("frontend-design", "original"))
-	fixed := validSkillMD("frontend-design", "the corrected description")
-
-	first := suggest(t, svc, "agent-1", "fix", fixed)
-	if first.Deduplicated {
-		t.Fatal("the first suggestion has nothing to deduplicate against")
+// endorse endorses branch at the head the endorser just read, failing the
+// test on error.
+func endorse(t *testing.T, svc *Service, branch, endorser, headSHA string) *Suggestion {
+	t.Helper()
+	sg, err := svc.EndorseSuggestion(context.Background(), branch, endorser, plumbing.NewHash(headSHA))
+	if err != nil {
+		t.Fatal(err)
 	}
+	return sg
+}
+
+func TestEndorsementRaisesCorroboration(t *testing.T) {
+	svc, _ := newTestService(t, "frontend-design", validSkillMD("frontend-design", "original"))
+
+	first := suggest(t, svc, "agent-1", "fix", validSkillMD("frontend-design", "the corrected description"))
 	if first.Suggestion.Corroboration != 1 {
 		t.Fatalf("expected corroboration 1 for a lone suggestion, got %d", first.Suggestion.Corroboration)
 	}
 
-	second := suggest(t, svc, "agent-2", "also-fix", fixed)
-	if !second.Deduplicated {
-		t.Fatal("expected the second agent's identical content to deduplicate onto the first suggestion")
-	}
-	if got, want := second.Suggestion.Branch, first.Suggestion.Branch; got != want {
-		t.Fatalf("expected to be returned the existing suggestion %q, got %q", want, got)
-	}
-	if got := second.Suggestion.Corroboration; got != 2 {
+	sg := endorse(t, svc, first.Suggestion.Branch, "agent-2", first.Suggestion.HeadSHA)
+	if got := sg.Corroboration; got != 2 {
 		t.Fatalf("expected corroboration 2 after one endorsement, got %d", got)
 	}
+	if len(sg.Endorsements) != 1 || sg.Endorsements[0].AgentID != "agent-2" {
+		t.Fatalf("expected a single endorsement by agent-2, got %+v", sg.Endorsements)
+	}
+	if sg.Endorsements[0].Stale {
+		t.Fatal("an endorsement of the current head should not be stale")
+	}
 
-	// The endorsing agent must not have got a branch of its own - the whole
-	// point is that N agents produce one pull request, not N.
+	// Endorsing creates no branch of the endorser's own - the whole point is
+	// that N agents produce one pull request, not N.
 	all, err := svc.ListSuggestions(context.Background(), "frontend-design", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(all) != 1 {
-		t.Fatalf("expected exactly 1 suggestion branch after two identical suggestions, got %d", len(all))
-	}
-
-	endorsements := second.Suggestion.Endorsements
-	if len(endorsements) != 1 || endorsements[0].AgentID != "agent-2" {
-		t.Fatalf("expected a single endorsement by agent-2, got %+v", endorsements)
-	}
-	if endorsements[0].Stale {
-		t.Fatal("an endorsement of the current head should not be stale")
+		t.Fatalf("expected exactly 1 suggestion branch after an endorsement, got %d", len(all))
 	}
 }
 
-func TestDedupIgnoresWhitespaceOnlyDifferences(t *testing.T) {
+func TestSelfEndorsementIsRejected(t *testing.T) {
 	svc, _ := newTestService(t, "frontend-design", validSkillMD("frontend-design", "original"))
-	fixed := validSkillMD("frontend-design", "the corrected description")
 
-	suggest(t, svc, "agent-1", "fix", fixed)
-	// Same content, trailing spaces and extra blank lines at EOF.
-	messy := strings.ReplaceAll(fixed, "\nbody\n", "   \nbody   \n\n\n")
-
-	second := suggest(t, svc, "agent-2", "also-fix", messy)
-	if !second.Deduplicated {
-		t.Fatal("expected whitespace-only differences to normalize to the same content hash")
+	first := suggest(t, svc, "agent-1", "fix", validSkillMD("frontend-design", "fixed"))
+	_, err := svc.EndorseSuggestion(context.Background(), first.Suggestion.Branch, "agent-1", plumbing.NewHash(first.Suggestion.HeadSHA))
+	if err == nil {
+		t.Fatal("expected the suggesting agent's own endorsement to be rejected")
 	}
 }
 
-func TestDifferentContentDoesNotDeduplicate(t *testing.T) {
+func TestEndorsementOfSupersededHeadIsRejected(t *testing.T) {
 	svc, _ := newTestService(t, "frontend-design", validSkillMD("frontend-design", "original"))
 
-	suggest(t, svc, "agent-1", "fix", validSkillMD("frontend-design", "one fix"))
-	second := suggest(t, svc, "agent-2", "fix", validSkillMD("frontend-design", "a different fix"))
+	first := suggest(t, svc, "agent-1", "fix", validSkillMD("frontend-design", "fixed"))
+	staleHead := first.Suggestion.HeadSHA
 
-	if second.Deduplicated {
-		t.Fatal("suggestions with different content must not collapse")
+	// The suggestion advances after agent-2 read it but before it endorses.
+	suggest(t, svc, "agent-1", "fix", validSkillMD("frontend-design", "revised"))
+
+	_, err := svc.EndorseSuggestion(context.Background(), first.Suggestion.Branch, "agent-2", plumbing.NewHash(staleHead))
+	if err == nil {
+		t.Fatal("expected an endorsement of a superseded head to be rejected")
 	}
-	if second.Suggestion.AgentID != "agent-2" {
-		t.Fatalf("expected agent-2 to get its own suggestion, got %q", second.Suggestion.AgentID)
-	}
-}
 
-func TestAllowDuplicateForcesOwnBranch(t *testing.T) {
-	svc, _ := newTestService(t, "frontend-design", validSkillMD("frontend-design", "original"))
-	fixed := validSkillMD("frontend-design", "the corrected description")
-
-	suggest(t, svc, "agent-1", "fix", fixed)
-
-	res, err := svc.RecordSuggestion(context.Background(), SuggestInput{
-		SkillName:      "frontend-design",
-		AgentID:        "agent-2",
-		SuggestionID:   "fix",
-		Files:          []FileEdit{{FilePath: "SKILL.md", Content: fixed}},
-		AllowDuplicate: true,
-	})
+	sg, err := svc.GetSuggestion(context.Background(), first.Suggestion.Branch)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Deduplicated {
-		t.Fatal("allow_duplicate must bypass the dedup check")
+	if len(sg.Endorsements) != 0 {
+		t.Fatalf("a refused endorsement must not be recorded, got %+v", sg.Endorsements)
 	}
-	if res.Suggestion.AgentID != "agent-2" {
-		t.Fatalf("expected agent-2's own branch, got %q", res.Suggestion.Branch)
+}
+
+func TestRepeatEndorsementDoesNotInflateCorroboration(t *testing.T) {
+	svc, _ := newTestService(t, "frontend-design", validSkillMD("frontend-design", "original"))
+
+	first := suggest(t, svc, "agent-1", "fix", validSkillMD("frontend-design", "fixed"))
+	endorse(t, svc, first.Suggestion.Branch, "agent-2", first.Suggestion.HeadSHA)
+	sg := endorse(t, svc, first.Suggestion.Branch, "agent-2", first.Suggestion.HeadSHA)
+
+	if got := sg.Corroboration; got != 2 {
+		t.Fatalf("expected a repeat endorsement by the same agent to count once, got corroboration %d", got)
+	}
+	if len(sg.Endorsements) != 1 {
+		t.Fatalf("expected one endorsement record for agent-2, got %d", len(sg.Endorsements))
 	}
 }
 
 func TestEndorsementGoesStaleWhenSuggestionAdvances(t *testing.T) {
 	svc, _ := newTestService(t, "frontend-design", validSkillMD("frontend-design", "original"))
 	ctx := context.Background()
-	fixed := validSkillMD("frontend-design", "the corrected description")
 
-	suggest(t, svc, "agent-1", "fix", fixed)
-	second := suggest(t, svc, "agent-2", "also-fix", fixed)
-	if second.Suggestion.Corroboration != 2 {
-		t.Fatalf("precondition: expected corroboration 2, got %d", second.Suggestion.Corroboration)
+	first := suggest(t, svc, "agent-1", "fix", validSkillMD("frontend-design", "the corrected description"))
+	sg := endorse(t, svc, first.Suggestion.Branch, "agent-2", first.Suggestion.HeadSHA)
+	if sg.Corroboration != 2 {
+		t.Fatalf("precondition: expected corroboration 2, got %d", sg.Corroboration)
 	}
 
-	// agent-1 revises its suggestion. agent-2 corroborated the previous
-	// content and never saw this, so the agreement must not carry forward.
+	// agent-1 revises its suggestion. agent-2 endorsed the previous content
+	// and never saw this, so the agreement must not carry forward.
 	suggest(t, svc, "agent-1", "fix", validSkillMD("frontend-design", "revised again"))
 
 	sg, err := svc.GetSuggestion(ctx, "suggestions/agent-1/frontend-design/fix")
@@ -142,23 +138,6 @@ func TestEndorsementGoesStaleWhenSuggestionAdvances(t *testing.T) {
 	}
 	if len(sg.Endorsements) != 1 || !sg.Endorsements[0].Stale {
 		t.Fatalf("expected the endorsement to be retained but marked stale, got %+v", sg.Endorsements)
-	}
-}
-
-func TestIteratingOnOwnBranchIsNeverDeduplicated(t *testing.T) {
-	svc, _ := newTestService(t, "frontend-design", validSkillMD("frontend-design", "original"))
-
-	suggest(t, svc, "agent-1", "fix", validSkillMD("frontend-design", "agent one's answer"))
-	suggest(t, svc, "agent-2", "fix", validSkillMD("frontend-design", "agent two's answer"))
-
-	// agent-2 now revises into exactly what agent-1 already has. Its own
-	// branch already exists, so it keeps it rather than being diverted.
-	res := suggest(t, svc, "agent-2", "fix", validSkillMD("frontend-design", "agent one's answer"))
-	if res.Deduplicated {
-		t.Fatal("an agent iterating on its own existing branch must not be redirected onto another agent's suggestion")
-	}
-	if res.Suggestion.AgentID != "agent-2" {
-		t.Fatalf("expected to stay on agent-2's branch, got %q", res.Suggestion.Branch)
 	}
 }
 
@@ -254,26 +233,5 @@ func TestClusteringGroupsOverlappingEditsAndSeparatesDistantOnes(t *testing.T) {
 	}
 	if withSingletons[0].DistinctAgents < withSingletons[1].DistinctAgents {
 		t.Fatal("expected clusters to be sorted most-corroborated first")
-	}
-}
-
-func TestNormalizeContent(t *testing.T) {
-	cases := []struct {
-		name string
-		in   string
-		want string
-	}{
-		{"crlf becomes lf", "a\r\nb\r\n", "a\nb\n"},
-		{"trailing spaces stripped", "a   \nb\t\n", "a\nb\n"},
-		{"trailing blank lines dropped", "a\nb\n\n\n\n", "a\nb\n"},
-		{"missing final newline added", "a\nb", "a\nb\n"},
-		{"empty stays empty", "\n\n", ""},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := string(normalizeContent([]byte(tc.in))); got != tc.want {
-				t.Fatalf("normalizeContent(%q) = %q, want %q", tc.in, got, tc.want)
-			}
-		})
 	}
 }

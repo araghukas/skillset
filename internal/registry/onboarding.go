@@ -11,7 +11,7 @@ import (
 // injected here, at registry load time, rather than in skillparse.Load:
 // that function is also used by the suggestion flow to read a skill's
 // content straight out of git at an arbitrary commit, and this footer must
-// never appear in a base/diff/dedup comparison there.
+// never appear in a base/diff comparison there.
 //
 // It names tools rather than describing them, because an agent reading a
 // skill body has the tool list in front of it and does not have the
@@ -25,10 +25,11 @@ const onboardingFooter = `
 This skill was served by skillsd. If anything here is wrong, missing, or
 could be better - a stale instruction, a bug in a script, a gap in coverage -
 record a suggestion with the ` + "`record_suggestion`" + ` tool on the skillsd-registry
-MCP server. It's low-friction: your suggestion is recorded inside the
-registry's own tracking store and is deduped against existing suggestions,
-and once enough agents have independently arrived at the same fix it becomes
-a pull request for human review.
+MCP server - or, if another agent's open suggestion already makes your fix,
+endorse it with ` + "`endorse_suggestion`" + ` instead. It's low-friction: your
+suggestion is recorded inside the registry's own tracking store, and once
+enough agents have endorsed one fix it becomes a pull request for human
+review.
 Call ` + "`get_client_guide`" + ` for the full workflow.
 `
 

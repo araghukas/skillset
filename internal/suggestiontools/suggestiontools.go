@@ -1,10 +1,11 @@
 // Package suggestiontools registers skillsd-registry's write-path MCP
-// tools: recording suggested edits to a skill, inspecting suggestions and
-// the clusters they fall into, and reading a skill at any ref.
+// tools: recording suggested edits to a skill, endorsing another agent's
+// suggestion after reading it, inspecting suggestions and the clusters they
+// fall into, and reading a skill at any ref.
 //
-// No tool here opens a pull request. That happens only when a suggestion
-// reaches the corroboration threshold, which the registry evaluates itself -
-// see maybeAutoSubmit.
+// No tool here opens a pull request directly. That happens only when a
+// suggestion reaches the endorsement threshold, which the registry
+// evaluates itself - see maybeAutoSubmit.
 package suggestiontools
 
 import (
@@ -16,6 +17,7 @@ import (
 	"github.com/araghukas/skillset/internal/submit"
 	"github.com/araghukas/skillset/internal/suggestions"
 	"github.com/araghukas/skillset/internal/toolresult"
+	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -29,9 +31,10 @@ type Deps struct {
 	// crossing the corroboration threshold has no effect.
 	SubmitConfigured bool
 
-	// AutoSubmitThreshold is how many independent agents must arrive at
-	// identical content before a pull request is opened for it. Zero means
-	// no pull request is ever opened and suggestions stay as local branches.
+	// AutoSubmitThreshold is how many agents must stand behind a
+	// suggestion's current content - the suggesting agent plus its non-stale
+	// endorsers - before a pull request is opened for it. Zero means no pull
+	// request is ever opened and suggestions stay as local branches.
 	AutoSubmitThreshold int
 
 	// DefaultMaxBytes is the context-file byte budget applied when a
@@ -54,20 +57,31 @@ type Deps struct {
 func Add(srv *mcp.Server, deps Deps) {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: "record_suggestion",
-		Description: "Record a suggested edit to a skill. Send the change as a unified diff in " +
-			"patch; files, carrying whole file contents, is for new files that have nothing to " +
-			"diff against. The change is recorded " +
-			"as a commit inside the registry's own internal git store, purely for tracking and " +
-			"corroboration; you have no git access to it and nothing is pushed anywhere until " +
-			"the registry opens a pull request on its own. If another agent's open suggestion " +
-			"already produces byte-identical content, no new branch is created: you are recorded " +
-			"as independently corroborating theirs, and it is returned with deduplicated set. " +
-			"A pull request opens only once enough agents have independently corroborated the " +
-			"same content, which the registry decides on its own. Cite report IDs from " +
-			"list_outcome_reports in motivating_report_ids so a reviewer can see the failures " +
-			"this claims to fix.",
+		Description: "Record a suggested edit to a skill, starting (or continuing) a suggestion " +
+			"stream of your own. Before starting a new one, check list_suggestion_clusters and " +
+			"get_suggestion for an open suggestion making the same fix - if you would approve " +
+			"one exactly as-is, call endorse_suggestion instead of recording a near-duplicate. " +
+			"Send the change as a unified diff in patch; files, carrying whole file contents, " +
+			"is for new files that have nothing to diff against. The change is recorded as a " +
+			"commit inside the registry's own internal git store, purely for tracking; you have " +
+			"no git access to it and nothing is pushed anywhere until the registry opens a pull " +
+			"request on its own, once enough agents have endorsed the suggestion. Cite report " +
+			"IDs from list_outcome_reports in motivating_report_ids so a reviewer can see the " +
+			"failures this claims to fix.",
 		Annotations: writeTool(true),
 	}, recordSuggestion(deps))
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name: "endorse_suggestion",
+		Description: "Endorse another agent's open suggestion after reading its diff with " +
+			"get_suggestion. Endorse only if you would approve the diff exactly as it stands - " +
+			"if you would change anything at all, record your own suggestion instead. Pass the " +
+			"head_sha you read; the endorsement is refused if the suggestion has advanced since, " +
+			"so you never vouch for content you haven't seen. You cannot endorse your own " +
+			"suggestion, and endorsing twice does not count twice. Enough endorsements lead the " +
+			"registry to open a pull request on its own.",
+		Annotations: writeTool(true),
+	}, endorseSuggestion(deps))
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: "list_suggestions",
@@ -78,17 +92,18 @@ func Add(srv *mcp.Server, deps Deps) {
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "get_suggestion",
-		Description: "Fetch one suggestion by branch name, including its unified diff against the base branch, its commits, and the agents who independently corroborated it.",
+		Description: "Fetch one suggestion by branch name, including its unified diff against the base branch, its commits, and the agents who endorsed it. Reading the diff here is the precondition for endorse_suggestion.",
 		Annotations: readOnly(),
 	}, getSuggestion(deps))
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: "list_suggestion_clusters",
 		Description: "Group a skill's open suggestions by whether they edit overlapping regions " +
-			"of the same files - competing answers to what is probably the same defect. " +
-			"Ordered most-corroborated first, so this is the queue to work from when deciding " +
-			"what to review or fix next. Clusters are recomputed on every call and measure only " +
-			"whether agents converged, never whether any suggestion is good.",
+			"of the same files. Check this before recording a suggestion: a cluster member you " +
+			"would approve as-is is one to endorse rather than duplicate. A cluster of " +
+			"suggestions none of whose authors endorsed each other marks genuine disagreement " +
+			"about the same passage, worth a human's attention. Ordered most-corroborated " +
+			"first; recomputed on every call.",
 		Annotations: readOnly(),
 	}, listClusters(deps))
 
@@ -137,14 +152,12 @@ type RecordSuggestionInput struct {
 	CommitMessage       string          `json:"commit_message,omitempty" jsonschema:"commit subject; defaulted from the skill name when omitted"`
 	SourceThreadURI     string          `json:"source_thread_uri,omitempty" jsonschema:"pointer to the conversation that produced this change, if you have one"`
 	MotivatingReportIDs []string        `json:"motivating_report_ids,omitempty" jsonschema:"report IDs from list_outcome_reports that justify this change; they reach the pull request so a reviewer sees the evidence"`
-	AllowDuplicate      bool            `json:"allow_duplicate,omitempty" jsonschema:"force your own branch even if an identical suggestion exists. Rarely wanted - corroborating the existing one is almost always better"`
 }
 
 // RecordSuggestionOutput reports what happened to a recorded suggestion.
 type RecordSuggestionOutput struct {
-	Suggestion    *suggestions.Suggestion `json:"suggestion" jsonschema:"your suggestion, or - when deduplicated - the existing one you were recorded as corroborating"`
-	Deduplicated  bool                    `json:"deduplicated,omitempty" jsonschema:"an open suggestion already produced identical content, so no new branch was created and your contribution was recorded as corroboration of it"`
-	AutoSubmitted *suggestions.Submission `json:"auto_submitted,omitempty" jsonschema:"set if this call pushed the suggestion to the corroboration threshold and a pull request was opened automatically"`
+	Suggestion    *suggestions.Suggestion `json:"suggestion" jsonschema:"your suggestion as recorded"`
+	AutoSubmitted *suggestions.Submission `json:"auto_submitted,omitempty" jsonschema:"set if this call pushed the suggestion to the endorsement threshold and a pull request was opened automatically"`
 }
 
 func recordSuggestion(deps Deps) mcp.ToolHandlerFor[RecordSuggestionInput, RecordSuggestionOutput] {
@@ -167,7 +180,6 @@ func recordSuggestion(deps Deps) mcp.ToolHandlerFor[RecordSuggestionInput, Recor
 			CommitMessage:       in.CommitMessage,
 			SourceThreadURI:     in.SourceThreadURI,
 			MotivatingReportIDs: in.MotivatingReportIDs,
-			AllowDuplicate:      in.AllowDuplicate,
 		})
 		if err != nil {
 			return nil, RecordSuggestionOutput{}, err
@@ -175,21 +187,47 @@ func recordSuggestion(deps Deps) mcp.ToolHandlerFor[RecordSuggestionInput, Recor
 
 		return nil, RecordSuggestionOutput{
 			Suggestion:    res.Suggestion,
-			Deduplicated:  res.Deduplicated,
 			AutoSubmitted: maybeAutoSubmit(ctx, deps, res.Suggestion),
 		}, nil
 	}
 }
 
-// maybeAutoSubmit opens a pull request if this suggestion has now been
-// corroborated by enough independent agents. This is the only path to a pull
-// request: no caller can ask for one.
+// EndorseSuggestionInput identifies the suggestion being endorsed and the
+// exact revision of it the endorser read.
+type EndorseSuggestionInput struct {
+	Branch  string `json:"branch" jsonschema:"the suggestion's branch name, as returned by get_suggestion or list_suggestions"`
+	AgentID string `json:"agent_id" jsonschema:"stable identifier for you, the calling agent; must not contain \"/\". Must differ from the suggestion's own agent_id"`
+	HeadSHA string `json:"head_sha" jsonschema:"the suggestion's head_sha from the get_suggestion response you read; refused if the suggestion has advanced since, in which case re-read it first"`
+}
+
+// EndorseSuggestionOutput reports the endorsed suggestion's new state.
+type EndorseSuggestionOutput struct {
+	Suggestion    *suggestions.Suggestion `json:"suggestion" jsonschema:"the endorsed suggestion, with your endorsement reflected in its corroboration count"`
+	AutoSubmitted *suggestions.Submission `json:"auto_submitted,omitempty" jsonschema:"set if this endorsement pushed the suggestion to the threshold and a pull request was opened automatically"`
+}
+
+func endorseSuggestion(deps Deps) mcp.ToolHandlerFor[EndorseSuggestionInput, EndorseSuggestionOutput] {
+	return func(ctx context.Context, _ *mcp.CallToolRequest, in EndorseSuggestionInput) (*mcp.CallToolResult, EndorseSuggestionOutput, error) {
+		sg, err := deps.Suggestions.EndorseSuggestion(ctx, in.Branch, in.AgentID, plumbing.NewHash(in.HeadSHA))
+		if err != nil {
+			return nil, EndorseSuggestionOutput{}, err
+		}
+		return nil, EndorseSuggestionOutput{
+			Suggestion:    sg,
+			AutoSubmitted: maybeAutoSubmit(ctx, deps, sg),
+		}, nil
+	}
+}
+
+// maybeAutoSubmit opens a pull request if enough agents now stand behind
+// this suggestion - its author plus its non-stale endorsers. This is the
+// only path to a pull request: no caller can ask for one.
 //
 // Failures are logged and swallowed rather than returned: the agent's
-// contribution is already committed and corroborated, and turning a forge
-// outage into a failed record_suggestion would discard work that succeeded.
-// The suggestion stays on its branch and the next call that finds it at or
-// above the threshold retries.
+// contribution is already recorded, and turning a forge outage into a
+// failed call would discard work that succeeded. The suggestion stays on
+// its branch and the next call that finds it at or above the threshold
+// retries.
 func maybeAutoSubmit(ctx context.Context, deps Deps, sg *suggestions.Suggestion) *suggestions.Submission {
 	if deps.AutoSubmitThreshold <= 0 || !deps.SubmitConfigured {
 		return nil

@@ -17,20 +17,23 @@
 2. `list_outcome_reports({skill_name, exclude_empty_notes: true})` → read what
    actually went wrong, and collect the `report_id`s.
 3. `list_suggestion_clusters({skill_name})` → is someone already fixing this?
-   If so, read their suggestion before writing your own.
-4. `record_suggestion` with your change as a unified `patch` (whole file
-   contents in `files` only for a new file), and `motivating_report_ids` from
-   step 2. See the registry reference for how to produce the patch.
-   - If the response comes back `deduplicated: true`, you're done — an
-     identical suggestion existed and you've now corroborated it. Report that
-     rather than trying again.
-5. `get_skill_at_ref({skill_name, ref: <branch>})` → verify the result reads
-   the way you intended.
+   If so, `get_suggestion` their branch and read the actual diff.
+4. Decide: **endorse or record.**
+   - If an existing diff already makes your fix and you would approve it
+     exactly as-is, `endorse_suggestion` with its `branch` and the `head_sha`
+     you just read. You're done — report that you endorsed rather than
+     duplicating.
+   - Otherwise — nothing equivalent exists, or you'd change something —
+     `record_suggestion` with your change as a unified `patch` (whole file
+     contents in `files` only for a new file), and `motivating_report_ids`
+     from step 2. See the registry reference for how to produce the patch.
+5. If you recorded: `get_skill_at_ref({skill_name, ref: <branch>})` → verify
+   the result reads the way you intended.
 6. Stop there. The `branch` you get back is an internal tracking name inside
    skillsd-registry's own git store, not a pull request and not something you
    or anyone else has direct git access to — the registry pushes and opens
-   the pull request itself, once enough agents independently reach the same
-   content.
+   the pull request itself, once enough agents have endorsed one suggestion.
 
-Step 3 matters more than it looks. Skipping it is how a reviewer ends up with
-four suggestions fixing one typo four different ways.
+Steps 3–4 matter more than they look. Skipping them is how a reviewer ends up
+with four suggestions fixing one typo four different ways, none of which ever
+gathers enough endorsements to become a pull request.

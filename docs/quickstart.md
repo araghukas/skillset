@@ -75,9 +75,9 @@ registry:
   enabled: true
   skillsRepo:
     url: "https://github.com/<org>/<skills-repo>.git"
-  # autoSubmitEndorsements is how many agents must independently suggest the
-  # same fix before a PR opens; omitted here, so it takes the chart's own
-  # default of 2. Set it explicitly if you want a different threshold.
+  # autoSubmitEndorsements is how many agents must stand behind one fix -
+  # its author plus the agents that read and endorsed it - before a PR
+  # opens. Set it explicitly if you want a different threshold.
   # A value of 0 means suggestions never auto-push.
   autoSubmitEndorsements: 2
   github:
@@ -129,6 +129,13 @@ This registers the `skillsd` and `skillsd-registry` MCP servers, pre-approves
 all of their tools in the agent's permissions, and assigns the agent a stable
 `SKILLSET_AGENT_ID` — by editing `.claude/settings.json` and `.mcp.json` in the
 directory where it's invoked.
+
+**Re-run it after upgrading the servers.** The permission and hook blocks both
+converge on the tool set that version of the script knows about — newly added
+tools are granted, ones that no longer exist are dropped — and the run prints
+what changed. An agent whose permissions predate a tool doesn't error when it
+meets one, it quietly works around what it can't call, so an upgrade that adds
+a tool needs this pass to actually reach the fleet.
 
 It also installs hooks that hold the agent to the reporting contract: a turn
 that loads a skill is blocked from ending until it has called `report_outcome`

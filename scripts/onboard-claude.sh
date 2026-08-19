@@ -4,13 +4,19 @@
 # `claude mcp add` alone registers the servers but doesn't pre-approve their
 # tools, so the agent still hits a first-use permission prompt for every
 # skillsd/skillsd-registry tool. This script does four things: it registers
-# the servers, merges permission rules into the target settings.json so those
-# prompts never happen, assigns the agent a stable SKILLSET_AGENT_ID (a UUID
-# written to settings.json's `env`) so skillsd can identify it across
+# the servers, reconciles permission rules in the target settings.json so
+# those prompts never happen, assigns the agent a stable SKILLSET_AGENT_ID (a
+# UUID written to settings.json's `env`) so skillsd can identify it across
 # sessions, and installs the outcome-reporting hooks. It's read-modify-write
 # (via jq), so re-running it, or running it alongside unrelated manually-set
 # permissions and hooks, is safe — the agent ID is generated once and reused
 # on subsequent runs.
+#
+# Re-running it is also how an already-onboarded agent picks up tools added
+# by a later version of skillset: the permission and hook blocks below both
+# converge on what this version registers, and the run prints what changed.
+# An agent missing a permission silently falls back to whatever it can still
+# call, so a fleet that upgrades the servers should re-run this too.
 #
 # The hooks hold the agent to the reporting contract the client guide
 # describes: a turn that loads a skill can't end until it has called
@@ -151,6 +157,7 @@ if [ -n "$SKILLSD_REGISTRY_URL" ]; then
 	ALLOW_RULES+=(
 		"mcp__skillsd-registry__get_client_guide"
 		"mcp__skillsd-registry__record_suggestion"
+		"mcp__skillsd-registry__endorse_suggestion"
 		"mcp__skillsd-registry__report_outcome"
 		"mcp__skillsd-registry__get_suggestion"
 		"mcp__skillsd-registry__get_skill_at_ref"
@@ -168,13 +175,37 @@ mkdir -p "$(dirname "$SETTINGS_FILE")"
 [ -f "$SETTINGS_FILE" ] || echo '{}' >"$SETTINGS_FILE"
 
 RULES_JSON=$(printf '%s\n' "${ALLOW_RULES[@]}" | jq -R . | jq -s .)
+PREV_RULES=$(jq -c '.permissions.allow // []' "$SETTINGS_FILE")
 TMP=$(mktemp)
 jq --argjson new "$RULES_JSON" '
+  # Rules this script owns: exact mcp__skillsd… tool names. One that is no
+  # longer in the current set names a tool that has since been renamed or
+  # removed, so it is dropped rather than left behind - a re-run converges an
+  # older install onto the tools this version actually registers, the way
+  # install_hook below already does for hooks. Everything else in the list is
+  # someone else’s - a wildcard grant, another MCP server, a hand-written
+  # entry - and is left untouched.
+  def owned: test("^mcp__skillsd(-registry)?__[a-z0-9_]+$");
+
   .permissions //= {} |
   .permissions.allow //= [] |
-  .permissions.allow = (.permissions.allow + $new | unique)
+  .permissions.allow = (
+    (.permissions.allow | map(select((owned | not) or (. as $r | $new | index($r)))))
+    + $new | unique
+  )
 ' "$SETTINGS_FILE" >"$TMP"
 mv "$TMP" "$SETTINGS_FILE"
+
+# Say what actually changed. Without this a re-run that picks up a newly
+# added tool is indistinguishable from a no-op, which is how an agent ends up
+# silently missing a permission it needs.
+report_rules() {
+	local label="$1" rules="$2"
+	[ -n "$rules" ] || return 0
+	echo "    $label $(echo "$rules" | sed 's/^mcp__//' | tr '\n' ' ')"
+}
+report_rules "added: " "$(jq -r --argjson prev "$PREV_RULES" '.permissions.allow - $prev | .[]' "$SETTINGS_FILE")"
+report_rules "pruned:" "$(jq -r --argjson prev "$PREV_RULES" '$prev - .permissions.allow | .[]' "$SETTINGS_FILE")"
 
 # Keep the existing SKILLSET_AGENT_ID if this agent has already been
 # onboarded before, so re-running the script doesn't churn its identity.
